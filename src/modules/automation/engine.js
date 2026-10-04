@@ -1,6 +1,6 @@
 // Automation execution engine. Runs a workflow's nodes in order against a
-// single contact. Synchronous (no scheduler): `wait` steps are recorded as
-// skipped. `if_else` acts as a gate — if the condition fails the run stops.
+// single contact. Wait steps return a durable continuation for the automation
+// queue instead of keeping a process asleep. `if_else` chooses one branch.
 // dryRun evaluates without side effects (used by the test action).
 
 const { getModels } = require("../../db/models");
@@ -120,7 +120,9 @@ async function executeNode(node, ctx) {
     case "wait": {
       const amount = Number(config.amount || config.duration || 0);
       const unit = config.unit || "minutes";
-      return step(node, "success", amount ? `Wait noted: ${amount} ${unit}` : "Wait noted");
+      const waitMs = durationMs(amount, unit);
+      if (dryRun) return step(node, "success", `Would wait ${amount || 1} ${unit}`);
+      return { ...step(node, "waiting", `Waiting ${amount || 1} ${unit}`), waitMs };
     }
     case "send_sms":
     case "notify_team":
@@ -141,7 +143,8 @@ function hasBranchPaths(node) {
 async function runSequence(nodeList, ctx, steps) {
   let status = "success";
   let lastNodeId = null;
-  for (const node of nodeList) {
+  for (let index = 0; index < nodeList.length; index += 1) {
+    const node = nodeList[index];
     if (node.type === "trigger") continue; // triggers define enrollment, not execution
     lastNodeId = node.id;
     if (hasBranchPaths(node)) {
@@ -160,18 +163,38 @@ async function runSequence(nodeList, ctx, steps) {
     steps.push(result);
     if (result.status === "failed") return { status: "failed", lastNodeId };
     if (result.status === "stopped") return { status: "stopped", lastNodeId };
+    if (result.status === "waiting") {
+      return {
+        status: "waiting",
+        lastNodeId,
+        remainingNodes: nodeList.slice(index + 1),
+        resumeAt: new Date(Date.now() + result.waitMs).toISOString(),
+      };
+    }
   }
   return { status, lastNodeId };
 }
 
 // Execute a workflow for one contact. Returns { steps, status, currentNodeId }.
-async function runForContact(workflow, contact, { dryRun = false } = {}) {
+async function runForContact(workflow, contact, { dryRun = false, nodesOverride = null } = {}) {
   const models = getModels();
-  const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+  const nodes = Array.isArray(nodesOverride) ? nodesOverride : (Array.isArray(workflow.nodes) ? workflow.nodes : []);
   const ctx = { models, contact, locationId: workflow.locationId, dryRun };
   const steps = [];
   const result = await runSequence(nodes, ctx, steps);
-  return { steps, status: result.status, currentNodeId: result.lastNodeId };
+  return {
+    steps,
+    status: result.status,
+    currentNodeId: result.lastNodeId,
+    remainingNodes: result.remainingNodes || [],
+    resumeAt: result.resumeAt || null,
+  };
 }
 
-module.exports = { runForContact };
+function durationMs(amount, unit) {
+  const safeAmount = Math.min(365, Math.max(1, Number(amount) || 1));
+  const multiplier = unit === "days" ? 86400000 : unit === "hours" ? 3600000 : 60000;
+  return safeAmount * multiplier;
+}
+
+module.exports = { runForContact, durationMs };

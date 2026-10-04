@@ -11,7 +11,7 @@ function getClient() {
   return client;
 }
 
-function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc }) {
+function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc, headers }) {
   return new Promise((resolve, reject) => {
     const composer = new MailComposer({
       from,
@@ -19,6 +19,7 @@ function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc
       replyTo: replyTo || undefined,
       bcc: normalizeAddresses(bcc),
       subject: subject || "",
+      headers: normalizeHeaders(headers),
       html: html || "",
       text: text || stripHtml(html || ""),
       attachments: (attachments || []).map((a) => ({
@@ -35,12 +36,12 @@ function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc
   });
 }
 
-async function sendTransactionalEmail({ to, subject, html, text, from, attachments = [], messageId, replyTo, bcc = [] }) {
+async function sendTransactionalEmail({ to, subject, html, text, from, attachments = [], messageId, replyTo, bcc = [], headers = {} }) {
   const fromAddress = from || config.aws.ses.defaultFrom;
   const tags = [{ Name: "domain", Value: "transactional" }];
   if (messageId) tags.push({ Name: "message_id", Value: String(messageId).slice(0, 256) });
 
-  if (attachments && attachments.length > 0) {
+  if ((attachments && attachments.length > 0) || Object.keys(normalizeHeaders(headers)).length) {
     const rawMessage = await buildRawMime({
       from: fromAddress,
       to,
@@ -50,6 +51,7 @@ async function sendTransactionalEmail({ to, subject, html, text, from, attachmen
       attachments,
       replyTo,
       bcc,
+      headers,
     });
     const command = new SendEmailCommand({
       FromEmailAddress: fromAddress,
@@ -96,16 +98,30 @@ async function sendTransactionalEmail({ to, subject, html, text, from, attachmen
   };
 }
 
-async function sendMarketingEmail({ to, subject, html, text, from, trackingTags = [], replyTo, bcc = [] }) {
+async function sendMarketingEmail({ to, subject, html, text, from, trackingTags = [], replyTo, bcc = [], headers = {} }) {
+  const fromAddress = from || config.aws.ses.defaultFrom;
+  const emailTags = trackingTags.map((tag) => ({
+    Name: String(tag.name).slice(0, 256),
+    Value: String(tag.value).slice(0, 256),
+  }));
+  if (Object.keys(normalizeHeaders(headers)).length) {
+    const rawMessage = await buildRawMime({ from: fromAddress, to, subject, html, text, replyTo, bcc, headers });
+    const result = await getClient().send(new SendEmailCommand({
+      FromEmailAddress: fromAddress,
+      ConfigurationSetName: config.aws.ses.marketingConfigSet,
+      Destination: destinationFor(to, bcc),
+      ...replyToFor(replyTo),
+      EmailTags: emailTags,
+      Content: { Raw: { Data: rawMessage } },
+    }));
+    return { provider: "ses", providerMessageId: result.MessageId };
+  }
   const command = new SendEmailCommand({
-    FromEmailAddress: from || config.aws.ses.defaultFrom,
+    FromEmailAddress: fromAddress,
     ConfigurationSetName: config.aws.ses.marketingConfigSet,
     Destination: destinationFor(to, bcc),
     ...replyToFor(replyTo),
-    EmailTags: trackingTags.map((tag) => ({
-      Name: String(tag.name).slice(0, 256),
-      Value: String(tag.value).slice(0, 256),
-    })),
+    EmailTags: emailTags,
     Content: {
       Simple: {
         Subject: {
@@ -131,6 +147,12 @@ async function sendMarketingEmail({ to, subject, html, text, from, trackingTags 
     provider: "ses",
     providerMessageId: result.MessageId,
   };
+}
+
+function normalizeHeaders(headers) {
+  return Object.fromEntries(Object.entries(headers || {}).filter(([name, value]) =>
+    /^[A-Za-z0-9-]+$/.test(name) && value !== undefined && value !== null && !/[\r\n]/.test(String(value))
+  ).map(([name, value]) => [name, String(value)]));
 }
 
 function stripHtml(html) {

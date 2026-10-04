@@ -67,6 +67,12 @@ webhook handler detects domain → updates transactional OR marketing message + 
 | All 33 system templates + families | [docs/transactional-template-catalog.md](docs/transactional-template-catalog.md) |
 | Marketing module overview | [docs/marketing.md](docs/marketing.md) |
 | Marketing template builder | [docs/marketing-email-builder-platform.md](docs/marketing-email-builder-platform.md) |
+| CRM production roadmap + GoHighLevel plan | [docs/email-platform-roadmap.md](docs/email-platform-roadmap.md) |
+| Unified conversations architecture | [docs/conversations-omnichannel-architecture.md](docs/conversations-omnichannel-architecture.md) |
+| Customer email setup | [docs/customer/email-sending-setup.md](docs/customer/email-sending-setup.md) |
+| Customer campaign launch guide | [docs/customer/campaign-launch-guide.md](docs/customer/campaign-launch-guide.md) |
+| Customer Conversations guide | [docs/customer/conversations-guide.md](docs/customer/conversations-guide.md) |
+| CRM production incident runbook | [docs/runbooks/crm-production-incidents.md](docs/runbooks/crm-production-incidents.md) |
 | Admin UI structure (CRM settings + tabs) | [docs/settings.md](docs/settings.md) |
 | Postman collection | [docs/postman.md](docs/postman.md) |
 
@@ -81,6 +87,9 @@ npm run worker:marketing      # in a third terminal
 npm run worker:contacts       # CRM contact import jobs
 npm run worker:segments       # CRM segment recalculation jobs
 npm run worker:automation     # CRM automation trigger jobs
+npm run worker:rss            # RSS/Atom feed polling and campaign creation
+npm run worker:email-health   # provider credential health + DNS re-verification
+npm run credentials:rotate   # validates old/current keys (add -- --apply to rotate)
 ```
 
 `predev` script runs `migrate && seed` automatically when you `npm run dev`.
@@ -114,8 +123,23 @@ npm run worker:automation     # CRM automation trigger jobs
 | `SES_TRANSACTIONAL_CONFIG_SET` | prod | SES transactional configuration set |
 | `SES_MARKETING_CONFIG_SET` | prod | SES marketing configuration set |
 | `AWS_SES_REGION` | prod | SES region |
+| `SES_GLOBAL_CAPACITY_ENFORCEMENT` | prod | Must be `true`; atomically enforces the shared Movira SES account quota across locations |
+| `SES_CAPACITY_SNAPSHOT_TTL_SECONDS` | prod | Live SES quota refresh interval; default `60` |
+| `SES_CAPACITY_RESERVATION_TTL_SECONDS` | prod | Releases abandoned pre-send reservations; default `300` |
+| `SES_TRANSACTIONAL_CAPACITY_RESERVE_PERCENT` | prod | Shared quota protected from marketing traffic; default `20` |
+| `SES_CAPACITY_SAFETY_MARGIN_PERCENT` | prod | Safety buffer below the AWS quota; default `5` |
+| `CRM_QUEUE_WORKER_STALE_LOCK_MS` | prod | Reclaims durable jobs after a crashed worker; default `600000` (10 minutes) |
+| `CRM_CREDENTIALS_ENCRYPTION_KEY` | prod | Base64-encoded 32-byte current credential-encryption key; required before provider migration |
+| `CRM_CREDENTIALS_ENCRYPTION_KEY_ID` | prod | Stable identifier for the current key, for example `2026-10-primary` |
+| `CRM_CREDENTIALS_PREVIOUS_KEYS` | rotation only | JSON object containing old key IDs and base64 keys until every credential is re-encrypted |
 | `CRM_QUEUE_WORKER_POLL_MS` | no | DB-backed CRM queue worker poll interval |
 | `CRM_QUEUE_WORKER_BATCH_SIZE` | no | Jobs claimed per CRM queue worker poll |
+| `EMAIL_INFRA_HEALTH_INTERVAL_MINUTES` | no | Health worker loop interval; default `15` |
+| `EMAIL_PROVIDER_RECHECK_MINUTES` | no | Customer-provider credential handshake interval; default `1440` |
+| `EMAIL_PENDING_DOMAIN_RECHECK_MINUTES` | no | DNS/provider recheck interval before verification; default `60` |
+| `EMAIL_VERIFIED_DOMAIN_RECHECK_MINUTES` | no | Ongoing verification check interval; default `1440` |
+| `TRANSACTIONAL_MANUAL_RETRY_LIMIT` | no | Safe default maximum manual retries per failed transactional message; default `5` |
+| `CRM_LOCATION_EMAIL_LIMITS` | prod | JSON plan allowance map, for example `{"default":{"dailyLimit":10000,"hourlyLimit":2000},"51":{"dailyLimit":50000,"hourlyLimit":7000}}`; shared Movira limits apply per location after warmup |
 
 Without SQS URLs, message rows are created with status `enqueue_skipped` — handy for local dev.
 

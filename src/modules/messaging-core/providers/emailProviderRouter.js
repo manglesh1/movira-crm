@@ -6,6 +6,7 @@ const config = require("../../../config");
 const moviraSesProvider = require("./sesEmailProvider");
 const domainSenderResolver = require("./domainSenderResolver");
 const replyForwardService = require("../../settings/email/replyForwardService");
+const { decryptJsonIfNeeded } = require("../../../shared/credentialVault");
 
 function providerUseCase(kind) {
   return kind === "transactional" ? "transactional" : "marketing";
@@ -82,7 +83,7 @@ async function findProviderById(id) {
 }
 
 async function sendWithProviderRow(providerRow, input = {}, useCase = providerUseCase(providerRow?.domain)) {
-  const cfg = providerRow.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerRow.encryptedConfig);
   if (providerRow.provider === "customer_ses") {
     return sendCustomerSes(providerRow, cfg, input, useCase);
   }
@@ -134,7 +135,7 @@ async function sendCustomerSes(providerRow, cfg, input, useCase) {
     ...replyToFor(input.replyTo),
     EmailTags: tags,
   };
-  const content = input.attachments?.length
+  const content = (input.attachments?.length || Object.keys(normalizeHeaders(input.headers)).length)
     ? { Raw: { Data: await buildRawMime({ ...input, from: fromAddress }) } }
     : {
         Simple: {
@@ -166,6 +167,7 @@ async function sendSendgrid(providerRow, cfg, input, useCase = providerUseCase(p
     body: JSON.stringify({
       personalizations: [{
         to: [{ email: input.to }],
+        ...(Object.keys(normalizeHeaders(input.headers)).length ? { headers: normalizeHeaders(input.headers) } : {}),
         ...(normalizeAddresses(input.bcc).length
           ? { bcc: normalizeAddresses(input.bcc).map((email) => ({ email })) }
           : {}),
@@ -209,6 +211,7 @@ async function sendMailgun(providerRow, cfg, input, useCase) {
   form.append("html", input.html || input.text || "");
   form.append("text", input.text || stripHtml(input.html || ""));
   if (input.replyTo) form.append("h:Reply-To", input.replyTo);
+  for (const [name, value] of Object.entries(normalizeHeaders(input.headers))) form.append(`h:${name}`, value);
   for (const email of normalizeAddresses(input.bcc)) form.append("bcc", email);
   form.append("v:domain", useCase);
   if (input.messageId) form.append("v:message_id", String(input.messageId));
@@ -270,6 +273,7 @@ async function sendPostmark(providerRow, cfg, input, useCase) {
         return acc;
       }, {}),
     },
+    Headers: Object.entries(normalizeHeaders(input.headers)).map(([Name, Value]) => ({ Name, Value })),
   };
   if (cfg.messageStream) body.MessageStream = cfg.messageStream;
   if (input.attachments?.length) {
@@ -316,7 +320,7 @@ function mailgunApiBase(region) {
     : "https://api.mailgun.net";
 }
 
-function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc }) {
+function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc, headers }) {
   return new Promise((resolve, reject) => {
     const composer = new MailComposer({
       from,
@@ -324,6 +328,7 @@ function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc
       replyTo: replyTo || undefined,
       bcc: normalizeAddresses(bcc),
       subject: subject || "",
+      headers: normalizeHeaders(headers),
       html: html || "",
       text: text || stripHtml(html || ""),
       attachments: (attachments || []).map((a) => ({
@@ -338,6 +343,12 @@ function buildRawMime({ from, to, subject, html, text, attachments, replyTo, bcc
       resolve(message);
     });
   });
+}
+
+function normalizeHeaders(headers) {
+  return Object.fromEntries(Object.entries(headers || {}).filter(([name, value]) =>
+    /^[A-Za-z0-9-]+$/.test(name) && value !== undefined && value !== null && !/[\r\n]/.test(String(value))
+  ).map(([name, value]) => [name, String(value)]));
 }
 
 function normalizeAddresses(value) {

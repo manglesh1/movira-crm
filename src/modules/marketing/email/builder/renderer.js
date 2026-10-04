@@ -235,7 +235,7 @@ function renderSocialBlock(block, settings, data) {
       const href = escapeAttr(safeUrl(interpolate(item.href || item.url || "#", data)) || "#");
       const label = escapeHtml(item.label || item.type || "Social");
       const glyph = escapeHtml(item.glyph || label.slice(0, 2));
-      const color = escapeAttr(item.color || settings.linkColor || "#f97316");
+      const color = escapeAttr(item.color || settings.linkColor || "#7220E6");
       const content = display === "label" ? label : display === "icon-label" ? `${glyph} ${label}` : glyph;
       const linkStyle = display === "label"
         ? styleObj({
@@ -595,7 +595,7 @@ function renderCountdownBlock(block, settings, data) {
     parts.hours = Math.floor((diffMs % 86400000) / 3600000);
     parts.minutes = Math.floor((diffMs % 3600000) / 60000);
   }
-  const accent = s.accentColor || settings.buttonColor || "#f97316";
+  const accent = s.accentColor || settings.buttonColor || "#7220E6";
   const label = escapeHtml(interpolate(s.label || "Sale ends in", data));
   const cell = (value, suffix) => `
     <td align="center" style="padding:0 8px;">
@@ -620,7 +620,7 @@ function renderReviewLinkBlock(block, settings, data) {
   const padding = normalizePadding(s.padding, { top: 12, right: 0, bottom: 12, left: 0 });
   const href = escapeAttr(safeUrl(interpolate(s.href || "#", data)) || "#");
   const total = Math.max(1, Math.min(5, Number(s.stars) || 5));
-  const accent = s.color || settings.buttonColor || "#f97316";
+  const accent = s.color || settings.buttonColor || "#7220E6";
   const stars = Array.from({ length: 5 })
     .map((_v, i) => `<span style="color:${escapeAttr(i < total ? accent : "#e2e8f0")};font-size:22px;line-height:1;margin:0 1px;">★</span>`)
     .join("");

@@ -55,7 +55,7 @@ router.post("/providers/verify-config", async (req, res, next) => {
 
 router.post("/providers/:id/test", async (req, res, next) => {
   try {
-    const data = await service.testProvider(req.params.id, req.body);
+    const data = await service.testProvider(req.params.id, req.body, { locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -65,7 +65,7 @@ router.post("/providers/:id/test", async (req, res, next) => {
 
 router.delete("/providers/:id", async (req, res, next) => {
   try {
-    const removed = await service.deleteProvider(req.params.id);
+    const removed = await service.deleteProvider(req.params.id, { locationId: req.crmLocationId });
     res.json({ success: true, data: { removed } });
   } catch (err) {
     next(err);
@@ -86,7 +86,7 @@ router.get("/domains", async (req, res, next) => {
 
 router.get("/domains/:id", async (req, res, next) => {
   try {
-    const data = await service.getDomain(req.params.id);
+    const data = await service.getDomain(req.params.id, { locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -106,7 +106,7 @@ router.post("/domains", async (req, res, next) => {
 
 router.post("/domains/:id/verify", async (req, res, next) => {
   try {
-    const data = await service.verifyDomain(req.params.id);
+    const data = await service.verifyDomain(req.params.id, { locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -116,7 +116,17 @@ router.post("/domains/:id/verify", async (req, res, next) => {
 
 router.post("/domains/:id/set-default", async (req, res, next) => {
   try {
-    const data = await service.setDefaultDomain(req.params.id);
+    const data = await service.setDefaultDomain(req.params.id, { locationId: req.crmLocationId });
+    res.json({ success: true, data });
+  } catch (err) {
+    if (err.statusCode) return sendError(res, err);
+    return next(err);
+  }
+});
+
+router.patch("/domains/:id/warmup", async (req, res, next) => {
+  try {
+    const data = await service.updateWarmupControl(req.params.id, req.body || {}, { locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -126,7 +136,7 @@ router.post("/domains/:id/set-default", async (req, res, next) => {
 
 router.delete("/domains/:id", async (req, res, next) => {
   try {
-    await service.deleteDomain(req.params.id);
+    await service.deleteDomain(req.params.id, { locationId: req.crmLocationId });
     res.json({ success: true });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -193,7 +203,7 @@ router.get("/bounce-classification", async (req, res, next) => {
 
 router.patch("/routes/:id", async (req, res, next) => {
   try {
-    const data = await service.updateDomainRoute(req.params.id, req.body);
+    const data = await service.updateDomainRoute(req.params.id, req.body, { locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);

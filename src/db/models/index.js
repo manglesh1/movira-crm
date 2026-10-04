@@ -24,6 +24,7 @@ const defineCrmMarketingDripEnrollment = require("./CrmMarketingDripEnrollment")
 const defineCrmMarketingCalendarPlan = require("./CrmMarketingCalendarPlan");
 const defineCrmMarketingCalendarRule = require("./CrmMarketingCalendarRule");
 const defineCrmMarketingCalendarOverride = require("./CrmMarketingCalendarOverride");
+const defineCrmRssCampaign = require("./CrmRssCampaign");
 const defineCrmAuditLog = require("./CrmAuditLog");
 const defineCrmEventTemplateBinding = require("./CrmEventTemplateBinding");
 const defineCrmContact = require("./CrmContact");
@@ -41,6 +42,9 @@ const defineCrmAutomationWorkflow = require("./CrmAutomationWorkflow");
 const defineCrmAutomationRun = require("./CrmAutomationRun");
 const defineCrmAutomationEnrollmentJob = require("./CrmAutomationEnrollmentJob");
 const defineCrmQueueJob = require("./CrmQueueJob");
+const defineCrmProviderCapacity = require("./CrmProviderCapacity");
+const defineCrmProviderCapacityReservation = require("./CrmProviderCapacityReservation");
+const defineConversationModels = require("./ConversationModels");
 
 let models = null;
 
@@ -72,6 +76,7 @@ function getModels() {
   const CrmMarketingCalendarPlan = defineCrmMarketingCalendarPlan(sequelize);
   const CrmMarketingCalendarRule = defineCrmMarketingCalendarRule(sequelize);
   const CrmMarketingCalendarOverride = defineCrmMarketingCalendarOverride(sequelize);
+  const CrmRssCampaign = defineCrmRssCampaign(sequelize);
   const CrmAuditLog = defineCrmAuditLog(sequelize);
   const CrmEventTemplateBinding = defineCrmEventTemplateBinding(sequelize);
   const CrmContact = defineCrmContact(sequelize);
@@ -89,6 +94,20 @@ function getModels() {
   const CrmAutomationRun = defineCrmAutomationRun(sequelize);
   const CrmAutomationEnrollmentJob = defineCrmAutomationEnrollmentJob(sequelize);
   const CrmQueueJob = defineCrmQueueJob(sequelize);
+  const CrmProviderCapacity = defineCrmProviderCapacity(sequelize);
+  const CrmProviderCapacityReservation = defineCrmProviderCapacityReservation(sequelize);
+  const conversationModels = defineConversationModels(sequelize);
+  const {
+    CrmConversationChannelConnection,
+    CrmConversationIdentity,
+    CrmConversation,
+    CrmConversationMessage,
+    CrmConversationMessageEvent,
+    CrmConversationAssignment,
+    CrmConversationTag,
+    CrmConversationWebhookEvent,
+    CrmConversationOutbox,
+  } = conversationModels;
 
   CrmMarketingFolder.hasMany(CrmMarketingTemplate, { foreignKey: "folderId", as: "templates" });
   CrmMarketingTemplate.belongsTo(CrmMarketingFolder, { foreignKey: "folderId", as: "folder" });
@@ -115,6 +134,7 @@ function getModels() {
   CrmMarketingCalendarRule.belongsTo(CrmMarketingCalendarPlan, { foreignKey: "planId", as: "plan" });
   CrmMarketingCalendarPlan.hasMany(CrmMarketingCalendarOverride, { foreignKey: "planId", as: "overrides" });
   CrmMarketingCalendarOverride.belongsTo(CrmMarketingCalendarPlan, { foreignKey: "planId", as: "plan" });
+  CrmRssCampaign.belongsTo(CrmMarketingTemplate, { foreignKey: "templateId", as: "template" });
   CrmMarketingFolder.hasMany(CrmMarketingAsset, { foreignKey: "folderId", as: "assets" });
   CrmMarketingAsset.belongsTo(CrmMarketingFolder, { foreignKey: "folderId", as: "folder" });
   CrmContact.hasMany(CrmContactIdentity, { foreignKey: "contactId", as: "identities" });
@@ -131,6 +151,24 @@ function getModels() {
   CrmAutomationEnrollmentJob.belongsTo(CrmAutomationWorkflow, { foreignKey: "workflowId", as: "workflow" });
   CrmContact.hasMany(CrmAutomationRun, { foreignKey: "contactId", as: "automationRuns" });
   CrmAutomationRun.belongsTo(CrmContact, { foreignKey: "contactId", as: "contact" });
+
+  CrmConversationChannelConnection.hasMany(CrmConversation, { foreignKey: "connectionId", as: "conversations" });
+  CrmConversation.belongsTo(CrmConversationChannelConnection, { foreignKey: "connectionId", as: "connection" });
+  CrmConversationChannelConnection.hasMany(CrmConversationIdentity, { foreignKey: "connectionId", as: "identities" });
+  CrmConversationIdentity.belongsTo(CrmConversationChannelConnection, { foreignKey: "connectionId", as: "connection" });
+  CrmContact.hasMany(CrmConversationIdentity, { foreignKey: "contactId", as: "conversationIdentities" });
+  CrmConversationIdentity.belongsTo(CrmContact, { foreignKey: "contactId", as: "contact" });
+  CrmContact.hasMany(CrmConversation, { foreignKey: "contactId", as: "conversations" });
+  CrmConversation.belongsTo(CrmContact, { foreignKey: "contactId", as: "contact" });
+  CrmConversation.belongsTo(CrmConversationIdentity, { foreignKey: "identityId", as: "identity" });
+  CrmConversation.hasMany(CrmConversationMessage, { foreignKey: "conversationId", as: "messages" });
+  CrmConversationMessage.belongsTo(CrmConversation, { foreignKey: "conversationId", as: "conversation" });
+  CrmConversationMessage.hasMany(CrmConversationMessageEvent, { foreignKey: "messageId", as: "events" });
+  CrmConversationMessageEvent.belongsTo(CrmConversationMessage, { foreignKey: "messageId", as: "message" });
+  CrmConversation.hasMany(CrmConversationAssignment, { foreignKey: "conversationId", as: "assignmentHistory" });
+  CrmConversationAssignment.belongsTo(CrmConversation, { foreignKey: "conversationId", as: "conversation" });
+  CrmConversation.hasMany(CrmConversationTag, { foreignKey: "conversationId", as: "tags" });
+  CrmConversationTag.belongsTo(CrmConversation, { foreignKey: "conversationId", as: "conversation" });
 
   TransactionalMessage.hasMany(TransactionalDeliveryEvent, {
     foreignKey: "messageId",
@@ -182,6 +220,15 @@ function getModels() {
     as: "profile",
   });
 
+  CrmProviderCapacity.hasMany(CrmProviderCapacityReservation, {
+    foreignKey: "capacityId",
+    as: "reservations",
+  });
+  CrmProviderCapacityReservation.belongsTo(CrmProviderCapacity, {
+    foreignKey: "capacityId",
+    as: "capacity",
+  });
+
   models = {
     sequelize,
     TransactionalMessage,
@@ -209,6 +256,7 @@ function getModels() {
     CrmMarketingCalendarPlan,
     CrmMarketingCalendarRule,
     CrmMarketingCalendarOverride,
+    CrmRssCampaign,
     CrmAuditLog,
     CrmEventTemplateBinding,
     CrmContact,
@@ -226,6 +274,9 @@ function getModels() {
     CrmAutomationRun,
     CrmAutomationEnrollmentJob,
     CrmQueueJob,
+    CrmProviderCapacity,
+    CrmProviderCapacityReservation,
+    ...conversationModels,
   };
   return models;
 }

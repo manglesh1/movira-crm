@@ -23,6 +23,15 @@ function publicMessageUrls(messageId) {
   };
 }
 
+function oneClickUnsubscribeHeaders(messageId) {
+  const { unsubscribeUrl } = publicMessageUrls(messageId);
+  if (!unsubscribeUrl) return {};
+  return {
+    "List-Unsubscribe": `<${unsubscribeUrl}>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
+}
+
 async function dispatch(message) {
   if (message.channel !== "email") {
     throw new Error(`Marketing channel not implemented yet: ${message.channel}`);
@@ -48,6 +57,7 @@ async function dispatch(message) {
     html: rendered.html,
     text: rendered.text,
     from,
+    headers: oneClickUnsubscribeHeaders(message.id),
     trackingTags: [
       { name: "domain", value: "marketing" },
       { name: "message_id", value: message.id },
@@ -91,4 +101,5 @@ module.exports = {
   dispatch,
   renderStoredMessage,
   publicMessageUrls,
+  oneClickUnsubscribeHeaders,
 };

@@ -13,6 +13,10 @@ async function processAutomationQueueJob(job) {
     const summary = await automationService.processAutomationEnrollmentJob(payload.enrollmentJobId);
     return { automationEnrollment: summary };
   }
+  if (data.jobType === queueJobs.JOB_TYPES.AUTOMATION_RESUME) {
+    if (!payload.runId) throw new Error("automation.resume requires runId");
+    return automationService.resumeAutomationRun(payload.runId);
+  }
 
   if (data.jobType !== queueJobs.JOB_TYPES.AUTOMATION_EVENT) {
     throw new Error(`Unsupported automation queue job type: ${data.jobType}`);

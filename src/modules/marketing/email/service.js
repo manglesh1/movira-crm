@@ -22,6 +22,7 @@ const marketingMessageRepository = require("./messageRepository");
 const suppressionService = require("./suppressionService");
 const contactService = require("../../contacts/service");
 const queueJobs = require("../../queueJobs/service");
+const deliveryWindow = require("./deliveryWindow");
 const dripService = require("./dripService");
 const { requireMarketingSender } = require("../../messaging-core/providers/domainSenderResolver");
 const { assertMarketingWorkerOnline } = require("./sqsWorkerVerificationService");
@@ -1454,6 +1455,7 @@ function normalizeCampaignAudience(body = {}) {
 }
 
 function campaignSendOptions(body = {}) {
+  const controls = deliveryWindow.normalizeDeliveryControls(body);
   return {
     queueType: body.queueType === "journey" ? "journey" : "bulk",
     allowResend: body.allowResend === true,
@@ -1461,7 +1463,7 @@ function campaignSendOptions(body = {}) {
     from: body.from || null,
     data: body.data && typeof body.data === "object" ? body.data : {},
     source: body.source || "campaign_audience",
-    batchSize: Math.min(1000, Math.max(50, Number(body.batchSize || 500))),
+    ...controls,
   };
 }
 
@@ -1600,6 +1602,7 @@ async function createCampaignAudienceJob(campaign, body = {}) {
     locationId: campaign.locationId,
     priority: 45,
     payload: { campaignAudienceJobId: job.id },
+    runAt: deliveryWindow.nextAllowedDeliveryAt(new Date(), sendOptions.deliveryWindow),
   });
 
   return {
@@ -1620,6 +1623,127 @@ async function createCampaignAudienceJob(campaign, body = {}) {
   };
 }
 
+function requestedSchedule(body = {}) {
+  if (body._scheduledDispatch === true || !body.scheduledAt) return null;
+  const value = new Date(body.scheduledAt);
+  validate([
+    Number.isNaN(value.getTime()) && { field: "scheduledAt", message: "Choose a valid campaign date and time." },
+    !Number.isNaN(value.getTime()) && value.getTime() <= Date.now() && { field: "scheduledAt", message: "Scheduled campaign time must be in the future." },
+  ]);
+  return value;
+}
+
+async function scheduleCampaignDispatch(campaign, body, scheduledAt) {
+  const audienceSelected = hasAudienceSelection(body);
+  await assertMarketingWorkerOnline({ audience: audienceSelected || campaign.campaignType === "workflow_campaign" });
+  const dripSteps = await prepareDripCampaign(campaign, body);
+  const templateId = dripSteps?.[0]?.templateId || body.templateId || campaign.templateId;
+  const recipients = audienceSelected ? [] : normalizeRecipients(Array.isArray(body.recipients) ? body.recipients : []);
+  validate([
+    !audienceSelected && recipients.length === 0 && { field: "recipients", message: "Choose an audience or at least one recipient before scheduling." },
+    !audienceSelected && recipients.length !== (Array.isArray(body.recipients) ? body.recipients.length : 0) && { field: "recipients", message: "Every scheduled recipient must include a valid email address." },
+    !templateId && { field: "templateId", message: "Choose a template before scheduling the campaign." },
+  ]);
+  await validateCampaignQueueContext(campaign, { ...body, templateId }, recipients);
+  const sendRequest = {
+    ...body,
+    templateId,
+    scheduledAt: null,
+    _scheduledDispatch: true,
+    ...(dripSteps ? { dripSteps } : {}),
+  };
+  const queueJob = await queueJobs.scheduleUniqueJob({
+    dedupeKey: `marketing-campaign-dispatch:${campaign.id}`,
+    jobType: queueJobs.JOB_TYPES.MARKETING_CAMPAIGN_DISPATCH,
+    locationId: campaign.locationId,
+    priority: 40,
+    runAt: scheduledAt,
+    maxAttempts: 8,
+    payload: { campaignId: campaign.id, sendRequest },
+  });
+  await campaign.update({ templateId, scheduledAt, status: "scheduled", executionDate: null });
+  return {
+    campaign: serializeCampaign(await campaign.reload()),
+    scheduled: true,
+    scheduledAt,
+    queueJob,
+    totalQueued: 0,
+    queued: [],
+  };
+}
+
+async function dispatchScheduledCampaign(campaignId, body = {}) {
+  const { CrmMarketingCampaign } = getModels();
+  const campaign = await CrmMarketingCampaign.findByPk(campaignId);
+  if (!campaign) throw notFound("Campaign");
+  if (campaign.status === "cancelled") return { skipped: true, reason: "campaign_cancelled", campaignId };
+  if (campaign.status === "paused") {
+    const error = new Error("Scheduled campaign is paused.");
+    error.code = "CAMPAIGN_PAUSED";
+    throw error;
+  }
+  if (campaign.status !== "scheduled") {
+    return { skipped: true, reason: `campaign_${campaign.status}`, campaignId };
+  }
+  return queueCampaignMessages(campaignId, { ...body, scheduledAt: null, _scheduledDispatch: true, source: "scheduled_campaign" });
+}
+
+async function scheduleRecipientBatches(campaign, body, recipients, controls) {
+  const chunks = [];
+  for (let index = 0; index < recipients.length; index += controls.batchSize) {
+    chunks.push(recipients.slice(index, index + controls.batchSize));
+  }
+  let runAt = deliveryWindow.nextAllowedDeliveryAt(new Date(), controls.deliveryWindow);
+  const firstRunAt = new Date(runAt);
+  const jobs = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    if (index > 0) runAt = deliveryWindow.nextBatchAt(runAt, controls);
+    jobs.push(await queueJobs.scheduleUniqueJob({
+      dedupeKey: `marketing-recipient-batch:${campaign.id}:${index}`,
+      jobType: queueJobs.JOB_TYPES.MARKETING_RECIPIENT_BATCH,
+      locationId: campaign.locationId,
+      priority: 45,
+      runAt,
+      maxAttempts: 8,
+      payload: {
+        campaignId: campaign.id,
+        batchIndex: index,
+        totalBatches: chunks.length,
+        sendRequest: {
+          ...body,
+          scheduledAt: null,
+          _scheduledDispatch: true,
+          _recipientBatchDispatch: true,
+          recipients: chunks[index],
+        },
+      },
+    }));
+  }
+  await campaign.update({ status: "sending", executionDate: campaign.executionDate || firstRunAt });
+  return {
+    campaign: serializeCampaign(await campaign.reload()),
+    batched: true,
+    totalBatches: chunks.length,
+    batchSize: controls.batchSize,
+    batchIntervalMinutes: controls.batchIntervalMinutes,
+    firstBatchAt: jobs[0]?.runAt || null,
+    lastBatchAt: jobs[jobs.length - 1]?.runAt || null,
+    queueJobs: jobs,
+    queued: [],
+    totalQueued: 0,
+  };
+}
+
+async function dispatchRecipientBatch(campaignId, body, { batchIndex = 0, totalBatches = 1 } = {}) {
+  const result = await queueCampaignMessages(campaignId, { ...body, _recipientBatchDispatch: true, scheduledAt: null });
+  if (batchIndex >= totalBatches - 1) {
+    const { CrmMarketingCampaign } = getModels();
+    const campaign = await CrmMarketingCampaign.findByPk(campaignId);
+    if (campaign?.status === "sending") await campaign.update({ status: "sent" });
+  }
+  return { ...result, batchIndex, totalBatches };
+}
+
 async function queueCampaignMessages(campaignId, body = {}) {
   const { CrmMarketingCampaign, CrmMarketingTemplate } = getModels();
   const campaign = await CrmMarketingCampaign.findByPk(campaignId);
@@ -1631,12 +1755,11 @@ async function queueCampaignMessages(campaignId, body = {}) {
     campaign.status === "cancelled" && { field: "status", message: "Cancelled campaigns cannot be queued." },
   ]);
 
-  if (campaign.campaignType === "workflow_campaign" && Object.prototype.hasOwnProperty.call(body, "scheduledAt")) {
-    const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : null;
-    validate([
-      scheduledAt && Number.isNaN(scheduledAt.getTime()) && { field: "scheduledAt", message: "Choose a valid drip start date and time." },
-    ]);
-    await campaign.update({ scheduledAt });
+  const scheduledAt = requestedSchedule(body);
+  if (scheduledAt) return scheduleCampaignDispatch(campaign, body, scheduledAt);
+
+  if (body._scheduledDispatch === true && campaign.status === "scheduled") {
+    await campaign.update({ status: "sending", executionDate: new Date() });
   }
 
   if (hasAudienceSelection(body)) {
@@ -1657,6 +1780,14 @@ async function queueCampaignMessages(campaignId, body = {}) {
   const { globalData } = await validateCampaignQueueContext(campaign, { ...body, templateId }, recipients);
 
   const queueType = campaignQueueType(campaign);
+  const controls = deliveryWindow.normalizeDeliveryControls(body);
+  if (body._recipientBatchDispatch !== true && (
+    controls.batchIntervalMinutes > 0
+      || controls.deliveryWindow.enabled
+      || recipients.length > controls.batchSize
+  )) {
+    return scheduleRecipientBatches(campaign, body, recipients, controls);
+  }
   const allowResend = body.allowResend === true;
   const queued = [];
   const suppressed = [];
@@ -1759,6 +1890,9 @@ async function queueCampaignMessages(campaignId, body = {}) {
   if (queued.length) {
     await campaign.increment("totalRecipients", { by: queued.length });
     await campaign.reload();
+  }
+  if (body._recipientBatchDispatch !== true && campaign.status === "sending") {
+    await campaign.update({ status: "sent" });
   }
 
   return {
@@ -1953,7 +2087,7 @@ async function pauseCampaign(id, body = {}) {
 }
 
 async function resumeCampaign(id, body = {}) {
-  const { CrmMarketingCampaign } = getModels();
+  const { CrmMarketingCampaign, CrmQueueJob } = getModels();
   const campaign = await CrmMarketingCampaign.findByPk(id);
   if (!campaign) throw notFound("Campaign");
   validate([
@@ -1962,11 +2096,33 @@ async function resumeCampaign(id, body = {}) {
       message: "Only paused campaigns can be resumed.",
     },
   ]);
-  const nextStatus = campaign.scheduledAt && new Date(campaign.scheduledAt) > new Date() ? "scheduled" : "sending";
+  const scheduledJob = await CrmQueueJob.findOne({ where: { dedupeKey: `marketing-campaign-dispatch:${campaign.id}` } });
+  const nextStatus = scheduledJob ? "scheduled" : "sending";
   await campaign.update({
     status: nextStatus,
-    executionDate: campaign.executionDate || new Date(),
+    executionDate: nextStatus === "scheduled" ? null : (campaign.executionDate || new Date()),
   });
+  const resumableJobs = await CrmQueueJob.findAll({
+    where: {
+      [Op.or]: [
+        { dedupeKey: `marketing-campaign-dispatch:${campaign.id}` },
+        { dedupeKey: { [Op.like]: `marketing-recipient-batch:${campaign.id}:%` } },
+      ],
+      status: { [Op.in]: ["pending", "processing", "completed", "failed"] },
+    },
+  });
+  for (const job of resumableJobs) {
+    const originalRunAt = new Date(job.runAt || 0);
+    await job.update({
+      status: "pending",
+      attempts: 0,
+      runAt: originalRunAt > new Date() ? originalRunAt : new Date(),
+      lockedAt: null,
+      lockedBy: null,
+      completedAt: null,
+      lastError: null,
+    });
+  }
   const resumedEnrollments = campaign.campaignType === "workflow_campaign"
     ? await dripService.resumeCampaignEnrollments(campaign.id)
     : 0;
@@ -1979,7 +2135,7 @@ async function resumeCampaign(id, body = {}) {
 }
 
 async function cancelCampaign(id, body = {}) {
-  const { CrmMarketingCampaign, CrmMarketingMessage } = getModels();
+  const { CrmMarketingCampaign, CrmMarketingMessage, CrmQueueJob } = getModels();
   const campaign = await CrmMarketingCampaign.findByPk(id);
   if (!campaign) throw notFound("Campaign");
   validate([
@@ -2016,6 +2172,18 @@ async function cancelCampaign(id, body = {}) {
     });
   }
   await campaign.update({ status: "cancelled" });
+  await CrmQueueJob.update(
+    { status: "cancelled", completedAt: new Date(), lockedAt: null, lockedBy: null },
+    {
+      where: {
+        [Op.or]: [
+          { dedupeKey: `marketing-campaign-dispatch:${campaign.id}` },
+          { dedupeKey: { [Op.like]: `marketing-recipient-batch:${campaign.id}:%` } },
+        ],
+        status: { [Op.in]: ["pending", "processing"] },
+      },
+    }
+  );
   const cancelledEnrollments = campaign.campaignType === "workflow_campaign"
     ? await dripService.cancelCampaignEnrollments(campaign.id, reason)
     : 0;
@@ -2285,7 +2453,8 @@ async function processCampaignAudienceBatch(job) {
   const dripSteps = sendOptions.queueType === "journey"
     ? cleanDripSteps(sendOptions.dripSteps)
     : [];
-  const batchSize = Math.min(1000, Math.max(50, Number(sendOptions.batchSize || 500)));
+  const controls = deliveryWindow.normalizeDeliveryControls(sendOptions);
+  const batchSize = controls.batchSize;
   const campaign = await models.CrmMarketingCampaign.findOne({ where: { id: job.campaignId, locationId: job.locationId } });
   if (!campaign) throw notFound("Campaign");
   if (campaign.status === "cancelled") {
@@ -2458,6 +2627,7 @@ async function processCampaignAudienceBatch(job) {
       locationId: job.locationId,
       priority: 45,
       payload: { campaignAudienceJobId: job.id },
+      runAt: deliveryWindow.nextBatchAt(new Date(), controls),
     });
   } else {
     await campaign.reload();
@@ -2502,6 +2672,8 @@ module.exports = {
   listCampaignAudienceJobs,
   getCampaignAudienceJob,
   processCampaignAudienceJob,
+  dispatchScheduledCampaign,
+  dispatchRecipientBatch,
   processDripStep,
   listCampaignDripEnrollments,
   // folders

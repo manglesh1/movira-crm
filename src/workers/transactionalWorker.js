@@ -96,15 +96,17 @@ async function pollQueue(queueUrl) {
         processedDelta: result?.skipped ? 0 : 1,
       }, logger);
     } catch (err) {
-      logger.error({ err }, "transactional message failed");
+      const isCapacityHeld = ["PROVIDER_CAPACITY_HELD", "PROVIDER_QUOTA_UNAVAILABLE"].includes(err.code);
+      logger[isCapacityHeld ? "warn" : "error"]({ err }, isCapacityHeld ? "transactional email capacity held" : "transactional message failed");
       await heartbeat.safeHeartbeat({
         workerType: "transactional-worker",
         workerId,
         queueType,
-        status: "error",
-        event: "failed",
-        failedDelta: 1,
-        error: err,
+        status: isCapacityHeld ? "rate_limited" : "error",
+        event: isCapacityHeld ? "rate_limited" : "failed",
+        failedDelta: isCapacityHeld ? 0 : 1,
+        error: isCapacityHeld ? null : err,
+        metadata: isCapacityHeld ? { retryAfterSeconds: err.retryAfterSeconds || null, capacity: err.details || null } : {},
       }, logger);
       // Do not delete the SQS message. SQS retry + DLQ policy owns redelivery.
     }

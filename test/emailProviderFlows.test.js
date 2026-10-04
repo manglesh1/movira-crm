@@ -13,6 +13,8 @@ const providerEventsService = require("../src/modules/webhooks/providerEventsSer
 const sesWebhookService = require("../src/modules/webhooks/sesService");
 const marketingTrackingService = require("../src/modules/marketing/tracking/service");
 const transactionalTracking = require("../src/modules/transactional/tracking");
+const config = require("../src/config");
+const { oneClickUnsubscribeHeaders } = require("../src/modules/marketing/email/messageDispatcher");
 
 afterEach(() => {
   mock.restoreAll();
@@ -40,7 +42,24 @@ const emailInput = {
     { name: "template_id", value: "tpl_1" },
     { name: "location_id", value: "15" },
   ],
+  headers: {
+    "List-Unsubscribe": "<https://crm.example.test/m/unsubscribe/msg_tx_123>",
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  },
 };
+
+test("marketing messages build RFC 8058 one-click unsubscribe headers", () => {
+  const previous = config.urls.trackingBaseUrl;
+  config.urls.trackingBaseUrl = "https://crm.example.test";
+  try {
+    assert.deepEqual(oneClickUnsubscribeHeaders("message-123"), {
+      "List-Unsubscribe": "<https://crm.example.test/m/unsubscribe/message-123>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+  } finally {
+    config.urls.trackingBaseUrl = previous;
+  }
+});
 
 test("customer SES provider sends transactional metadata tags", async () => {
   let commandInput = null;
@@ -182,6 +201,7 @@ test("SendGrid provider sends custom args used by the Event Webhook", async () =
     { email: "ops@example.test" },
   ]);
   assert.deepEqual(body.reply_to, { email: "replies@example.test" });
+  assert.equal(body.personalizations[0].headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
 });
 
 test("Mailgun provider sends variables used by Mailgun webhooks", async () => {
@@ -210,6 +230,7 @@ test("Mailgun provider sends variables used by Mailgun webhooks", async () => {
   assert.equal(fields["v:template_id"], "tpl_1");
   assert.deepEqual(request.options.body.getAll("bcc"), ["audit@example.test", "ops@example.test"]);
   assert.equal(fields["h:Reply-To"], "replies@example.test");
+  assert.equal(fields["h:List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
 });
 
 test("Postmark provider sends metadata used by Postmark webhooks", async () => {
@@ -238,6 +259,10 @@ test("Postmark provider sends metadata used by Postmark webhooks", async () => {
   assert.equal(body.Metadata.template_id, "tpl_1");
   assert.equal(body.ReplyTo, "replies@example.test");
   assert.equal(body.Bcc, "audit@example.test,ops@example.test");
+  assert.deepEqual(body.Headers.find((header) => header.Name === "List-Unsubscribe-Post"), {
+    Name: "List-Unsubscribe-Post",
+    Value: "List-Unsubscribe=One-Click",
+  });
 });
 
 test("SendGrid, Mailgun, and Postmark webhooks route events to transactional and marketing tracking", async () => {

@@ -1,4 +1,5 @@
 const { DataTypes } = require("sequelize");
+const { encryptJson, isEncrypted } = require("../../shared/credentialVault");
 
 function defineCrmProviderConfig(sequelize) {
   return sequelize.define(
@@ -17,7 +18,14 @@ function defineCrmProviderConfig(sequelize) {
       priority: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 },
       isDefault: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-      encryptedConfig: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      encryptedConfig: {
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: {},
+        set(value) {
+          this.setDataValue("encryptedConfig", isEncrypted(value) ? value : encryptJson(value || {}));
+        },
+      },
       verifiedAt: { type: DataTypes.DATE, allowNull: true },
       lastTestedAt: { type: DataTypes.DATE, allowNull: true },
       lastTestError: { type: DataTypes.TEXT, allowNull: true },

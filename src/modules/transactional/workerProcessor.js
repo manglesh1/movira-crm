@@ -3,6 +3,7 @@ const dispatcher = require("./dispatcher");
 const { DELIVERY_EVENT, STATUS } = require("./constants");
 const suppressionService = require("../marketing/email/suppressionService");
 const warmupService = require("../messaging-core/warmup/senderWarmupService");
+const capacityService = require("../messaging-core/capacity/providerCapacityService");
 
 async function processTransactionalSqsMessage(sqsMessage) {
   const body = parseBody(sqsMessage.Body);
@@ -31,19 +32,28 @@ async function processTransactionalSqsMessage(sqsMessage) {
     }
   }
 
+  let capacityReservation = null;
   if (message.channel === "email") {
-    const warmupReservation = await warmupService.reserveForMessage({
-      message,
-      useCase: "transactional",
-      recipient: message.recipientAddress,
-    });
-    if (warmupReservation?.warmup) {
-      await message.update({
-        payload: {
-          ...(message.payload || {}),
-          _warmup: warmupReservation.warmup,
-        },
+    const capacity = await capacityService.reserveForMessage({ message, useCase: "transactional", messageType: "transactional" });
+    capacityReservation = capacity.reservation || null;
+    if (capacity.alreadyAccepted && capacity.providerResult) {
+      await repository.markSent(message, capacity.providerResult);
+      return { skipped: true, reason: "provider_send_already_accepted", messageId: message.id, ...capacity.providerResult };
+    }
+    try {
+      const warmupReservation = await warmupService.reserveForMessage({
+        message,
+        useCase: "transactional",
+        recipient: message.recipientAddress,
       });
+      if (warmupReservation?.warmup) {
+        await message.update({
+          payload: { ...(message.payload || {}), _warmup: warmupReservation.warmup },
+        });
+      }
+    } catch (err) {
+      await capacityService.release(capacityReservation, err.code || "warmup_rejected");
+      throw err;
     }
   }
 
@@ -56,6 +66,8 @@ async function processTransactionalSqsMessage(sqsMessage) {
     });
 
     const result = await dispatcher.dispatch(message);
+
+    await capacityService.markAccepted(capacityReservation, result);
 
     await repository.markSent(message, result);
     await repository.createDeliveryEvent({
@@ -73,6 +85,7 @@ async function processTransactionalSqsMessage(sqsMessage) {
       providerMessageId: result.providerMessageId,
     };
   } catch (err) {
+    await capacityService.release(capacityReservation, err.code || "send_failed");
     await repository.markFailed(message, err);
     await repository.createDeliveryEvent({
       messageId: message.id,

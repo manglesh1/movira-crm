@@ -8,6 +8,7 @@ const contactRoutes = require("../modules/contacts/routes");
 const contactFieldRoutes = require("../modules/contactFields/routes");
 const segmentRoutes = require("../modules/segments/routes");
 const automationRoutes = require("../modules/automation/routes");
+const conversationRoutes = require("../modules/conversations/routes");
 
 const router = express.Router();
 
@@ -20,5 +21,6 @@ router.use("/contacts", contactRoutes);
 router.use("/contact-fields", contactFieldRoutes);
 router.use("/segments", segmentRoutes);
 router.use("/automation", automationRoutes);
+router.use("/conversations", conversationRoutes);
 
 module.exports = router;

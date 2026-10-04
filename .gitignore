@@ -28,4 +28,5 @@ yarn-error.log*
 /logs/*.log
 
 # personal/client docs (not tracked)
+/docs
 /doc

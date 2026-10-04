@@ -33,6 +33,15 @@ function plain(row) {
   return row?.get ? row.get({ plain: true }) : row;
 }
 
+function automationBatching(settings = {}) {
+  const configured = settings.batching && typeof settings.batching === "object" ? settings.batching : {};
+  return {
+    enabled: configured.enabled !== false,
+    batchSize: Math.min(1000, Math.max(1, Number(configured.batchSize || 100))),
+    intervalMinutes: Math.min(1440, Math.max(0, Number(configured.intervalMinutes || 1))),
+  };
+}
+
 function serializeEnrollmentJob(row) {
   const data = plain(row);
   return {
@@ -94,11 +103,59 @@ async function executeWorkflowForContact(models, workflow, contact, input = {}) 
     triggerKey: data.triggerKey,
     currentNodeId: result.currentNodeId,
     input,
-    result: { steps: result.steps },
+    result: { steps: result.steps, continuationNodes: result.remainingNodes || [], resumeAt: result.resumeAt || null },
     startedAt: new Date(),
-    completedAt: new Date(),
+    completedAt: result.status === "waiting" ? null : new Date(),
   });
+  if (result.status === "waiting") await scheduleAutomationResume(run, result);
   return { run, result };
+}
+
+async function scheduleAutomationResume(run, result) {
+  if (!result.resumeAt || !result.currentNodeId) throw new Error("Waiting automation run is missing its continuation time or node.");
+  return queueJobs.scheduleUniqueJob({
+    dedupeKey: `automation-resume:${run.id}:${result.currentNodeId}`,
+    jobType: queueJobs.JOB_TYPES.AUTOMATION_RESUME,
+    locationId: run.locationId,
+    priority: 35,
+    runAt: new Date(result.resumeAt),
+    maxAttempts: 8,
+    payload: { runId: run.id },
+  });
+}
+
+async function resumeAutomationRun(runId) {
+  const models = getModels();
+  const run = await models.CrmAutomationRun.findByPk(runId);
+  if (!run) throw notFound("Automation run");
+  if (run.status !== "waiting") return { skipped: true, reason: `run_${run.status}`, runId };
+  const [workflow, contact] = await Promise.all([
+    models.CrmAutomationWorkflow.findOne({ where: { id: run.workflowId, locationId: run.locationId } }),
+    run.contactId ? models.CrmContact.findOne({ where: { id: run.contactId, locationId: run.locationId } }) : null,
+  ]);
+  if (!workflow) throw notFound("Automation workflow");
+  if (!contact) throw notFound("Automation contact");
+  const previous = run.result || {};
+  const continuationNodes = Array.isArray(previous.continuationNodes) ? previous.continuationNodes : [];
+  const result = await engine.runForContact(workflow, contact, { nodesOverride: continuationNodes });
+  const steps = [...(Array.isArray(previous.steps) ? previous.steps : []), ...result.steps];
+  await run.update({
+    status: result.status,
+    currentNodeId: result.currentNodeId || run.currentNodeId,
+    result: { steps, continuationNodes: result.remainingNodes || [], resumeAt: result.resumeAt || null },
+    completedAt: result.status === "waiting" ? null : new Date(),
+    error: result.status === "failed" ? result.steps.find((item) => item.status === "failed")?.detail || "Automation step failed" : null,
+  });
+  if (result.status === "waiting") {
+    await scheduleAutomationResume(run, result);
+  } else {
+    await updateWorkflowRunStats(workflow, {
+      succeeded: result.status === "success" ? 1 : 0,
+      stopped: result.status === "stopped" ? 1 : 0,
+      failed: result.status === "failed" ? 1 : 0,
+    });
+  }
+  return { runId: run.id, status: result.status, currentNodeId: result.currentNodeId, resumeAt: result.resumeAt || null };
 }
 
 async function updateWorkflowRunStats(workflow, summary) {
@@ -388,7 +445,8 @@ async function enrollWorkflow(id, input = {}) {
 
   const hasSelection = Boolean(input.contactId || input.segmentId || input.filters || input.search || input.allowAll || (Array.isArray(input.ids) && input.ids.length));
   if (!hasSelection) throw badRequest("Choose contacts, a segment, filters, search, or allowAll before enrolling");
-  if (input.queue === true || input.segmentId || input.filters || input.search || input.allowAll || (Array.isArray(input.ids) && input.ids.length > 100)) {
+  const batching = automationBatching(data.settings);
+  if (input.queue === true || input.segmentId || input.filters || input.search || input.allowAll || (Array.isArray(input.ids) && input.ids.length > (batching.enabled ? 1 : 100))) {
     return createAutomationEnrollmentJob(workflow, input);
   }
 
@@ -401,7 +459,7 @@ async function enrollWorkflow(id, input = {}) {
     summary.enrolled += 1;
     if (result.status === "success") summary.succeeded += 1;
     else if (result.status === "stopped") summary.stopped += 1;
-    else summary.failed += 1;
+    else if (result.status !== "waiting") summary.failed += 1;
   }
 
   await updateWorkflowRunStats(workflow, summary);
@@ -414,7 +472,8 @@ async function processAutomationEnrollmentJob(enrollmentJobId) {
   if (!job) throw notFound("Automation enrollment job");
   const workflow = await models.CrmAutomationWorkflow.findOne({ where: { id: job.workflowId, locationId: job.locationId } });
   if (!workflow) throw notFound("Automation workflow");
-  const batchSize = 250;
+  const batching = automationBatching(plain(workflow).settings);
+  const batchSize = batching.enabled ? batching.batchSize : 1000;
 
   try {
     if (!job.startedAt) await job.update({ status: "processing", startedAt: new Date(), lastError: null });
@@ -439,7 +498,7 @@ async function processAutomationEnrollmentJob(enrollmentJobId) {
         summary.enrolled += 1;
         if (result.status === "success") summary.succeeded += 1;
         else if (result.status === "stopped") summary.stopped += 1;
-        else summary.failed += 1;
+        else if (result.status !== "waiting") summary.failed += 1;
       } catch (err) {
         summary.failed += 1;
         if (errors.length < 25) errors.push({ contactId: contact.id, message: err.message || String(err) });
@@ -459,10 +518,13 @@ async function processAutomationEnrollmentJob(enrollmentJobId) {
       completedAt: hasMore ? null : new Date(),
     });
     if (hasMore) {
-      await queueJobs.enqueueJob({
+      await queueJobs.scheduleUniqueJob({
+        dedupeKey: `automation-enrollment:${job.id}:${contacts[contacts.length - 1].id}`,
         jobType: queueJobs.JOB_TYPES.AUTOMATION_ENROLLMENT,
         locationId: job.locationId,
         priority: 50,
+        runAt: new Date(Date.now() + batching.intervalMinutes * 60000),
+        maxAttempts: 8,
         payload: { enrollmentJobId: job.id },
       });
     }
@@ -502,7 +564,7 @@ async function triggerWorkflowsForEvent(event = {}) {
       summary.enrolled += 1;
       if (result.status === "success") summary.succeeded += 1;
       else if (result.status === "stopped") summary.stopped += 1;
-      else summary.failed += 1;
+      else if (result.status !== "waiting") summary.failed += 1;
       await updateWorkflowRunStats(workflow, {
         enrolled: 1,
         succeeded: result.status === "success" ? 1 : 0,
@@ -558,7 +620,9 @@ module.exports = {
   listRuns,
   listWorkflows,
   processAutomationEnrollmentJob,
+  resumeAutomationRun,
   testWorkflow,
   triggerWorkflowsForEvent,
   updateWorkflow,
+  automationBatching,
 };

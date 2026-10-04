@@ -10,6 +10,7 @@ const corsOptions = require("./shared/corsOptions");
 const triggerLinkService = require("./modules/marketing/triggerLinks/service");
 const marketingTrackingRoutes = require("./modules/marketing/tracking/routes");
 const transactionalTrackingRoutes = require("./modules/transactional/trackingRoutes");
+const publicWebchatRoutes = require("./modules/conversations/publicWebchatRoutes");
 const { startUnverifiedDomainCleaner } = require("./workers/unverifiedDomainCleaner");
 
 const app = express();
@@ -17,7 +18,6 @@ const port = Number(process.env.PORT || 4100);
 
 
 app.use(helmet());
-app.use(cors(corsOptions));
 app.use(express.json({
   limit: "2mb",
   verify: (req, _res, buf) => {
@@ -27,11 +27,17 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(pinoHttp({ logger }));
 
+// The website widget is intentionally public and applies its own per-widget
+// origin allow-list. Mount it before the authenticated application's CORS
+// policy, which only permits Movira admin origins.
+app.use("/api/public/webchat", publicWebchatRoutes);
+app.use(cors(corsOptions));
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "movira-crm",
-    domains: ["transactional", "marketing"],
+    domains: ["transactional", "marketing", "conversations"],
   });
 });
 

@@ -39,9 +39,10 @@ router.get("/click/:messageId", async (req, res) => {
   return res.redirect(302, destinationUrl);
 });
 
-router.get("/unsubscribe/:messageId", async (req, res) => {
+async function unsubscribe(req, res, { oneClick = false } = {}) {
   try {
-    await service.recordUnsubscribe(req, req.params.messageId);
+    await service.recordUnsubscribe(req, req.params.messageId, { oneClick });
+    if (oneClick) return res.status(200).send("Unsubscribed");
     res.set("Content-Type", "text/html; charset=utf-8");
     return res.status(200).send(`<!doctype html>
 <html>
@@ -61,6 +62,13 @@ router.get("/unsubscribe/:messageId", async (req, res) => {
     if (err.statusCode === 404) return res.status(404).send("Message not found");
     return res.status(500).send("Could not unsubscribe");
   }
+}
+
+router.get("/unsubscribe/:messageId", (req, res) => unsubscribe(req, res));
+router.post("/unsubscribe/:messageId", express.urlencoded({ extended: false }), (req, res) => {
+  const oneClick = String(req.body?.["List-Unsubscribe"] || "").toLowerCase() === "one-click";
+  if (!oneClick) return res.status(400).send("Invalid one-click unsubscribe request");
+  return unsubscribe(req, res, { oneClick: true });
 });
 
 router.get("/view/:messageId", async (req, res) => {

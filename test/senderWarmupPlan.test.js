@@ -37,3 +37,19 @@ test("customer-owned providers use their own quota after warmup", () => {
     customProviderRecommendedAboveDaily: null,
   });
 });
+
+test("shared Movira allowance supports safe per-location plan overrides", () => {
+  const previous = process.env.CRM_LOCATION_EMAIL_LIMITS;
+  process.env.CRM_LOCATION_EMAIL_LIMITS = JSON.stringify({
+    default: { dailyLimit: 12000, hourlyLimit: 2200 },
+    51: { dailyLimit: 50000, hourlyLimit: 7000 },
+  });
+  try {
+    assert.deepEqual(warmupService.sharedMoviraAllowance(51), { dailyLimit: 50000, hourlyLimit: 7000 });
+    assert.deepEqual(warmupService.sharedMoviraAllowance(99), { dailyLimit: 12000, hourlyLimit: 2200 });
+    assert.equal(warmupService.getPostWarmupPolicy("movira_ses", 51).dailyLimit, 50000);
+  } finally {
+    if (previous === undefined) delete process.env.CRM_LOCATION_EMAIL_LIMITS;
+    else process.env.CRM_LOCATION_EMAIL_LIMITS = previous;
+  }
+});

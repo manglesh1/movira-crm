@@ -24,7 +24,7 @@ For the visual builder itself see [marketing-email-builder-platform.md](marketin
 - Segments — audience builder (orchestrators/README only; no implementation)
 - Journeys — multi-step automation (orchestrators/README only)
 - A/B testing — no variant logic
-- Scheduled send worker — `campaign.scheduledAt` field exists but no scheduler picks it up
+- Scheduled sends use durable `marketing.campaign_dispatch` jobs with a unique campaign key; the marketing-audience worker dispatches them at `runAt` and stale worker locks are reclaimed.
 
 ## Tables (selected)
 

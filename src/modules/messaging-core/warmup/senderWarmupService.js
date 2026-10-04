@@ -143,8 +143,9 @@ async function reserveForMessage({ message, useCase, recipient }) {
     const quotaHourSent = completedOnSharedMovira
       ? sharedMoviraProfiles.reduce((sum, item) => sum + Number(item.currentHourSent || 0), 0)
       : Number(profile.currentHourSent || 0);
-    const quotaDailyLimit = completedOnSharedMovira ? FINAL_STAGE.dailyLimit : Number(profile.dailyLimit || 0);
-    const quotaHourlyLimit = completedOnSharedMovira ? FINAL_STAGE.hourlyLimit : Number(profile.hourlyLimit || 0);
+    const allowance = sharedMoviraAllowance(profile.locationId);
+    const quotaDailyLimit = completedOnSharedMovira ? allowance.dailyLimit : Number(profile.dailyLimit || 0);
+    const quotaHourlyLimit = completedOnSharedMovira ? allowance.hourlyLimit : Number(profile.hourlyLimit || 0);
     const dailyExceeded = quotaTodaySent >= quotaDailyLimit;
     const hourlyExceeded = quotaHourSent >= quotaHourlyLimit;
     if (hourlyExceeded) {
@@ -433,14 +434,29 @@ function getWarmupPlan() {
   }));
 }
 
-function getPostWarmupPolicy(provider) {
+function sharedMoviraAllowance(locationId) {
+  const fallback = { dailyLimit: FINAL_STAGE.dailyLimit, hourlyLimit: FINAL_STAGE.hourlyLimit };
+  let configured = {};
+  try {
+    configured = JSON.parse(process.env.CRM_LOCATION_EMAIL_LIMITS || "{}");
+  } catch (_error) {
+    return fallback;
+  }
+  const selected = configured[String(locationId)] || configured.default || {};
+  const dailyLimit = Math.min(10000000, Math.max(FINAL_STAGE.dailyLimit, Number(selected.dailyLimit) || fallback.dailyLimit));
+  const hourlyLimit = Math.min(dailyLimit, Math.max(FINAL_STAGE.hourlyLimit, Number(selected.hourlyLimit) || fallback.hourlyLimit));
+  return { dailyLimit, hourlyLimit };
+}
+
+function getPostWarmupPolicy(provider, locationId) {
   if (provider === "movira_ses") {
+    const allowance = sharedMoviraAllowance(locationId);
     return {
       mode: "shared_movira_allowance",
       quotaScope: "location",
-      dailyLimit: FINAL_STAGE.dailyLimit,
-      hourlyLimit: FINAL_STAGE.hourlyLimit,
-      customProviderRecommendedAboveDaily: FINAL_STAGE.dailyLimit,
+      dailyLimit: allowance.dailyLimit,
+      hourlyLimit: allowance.hourlyLimit,
+      customProviderRecommendedAboveDaily: allowance.dailyLimit,
     };
   }
   return {
@@ -474,6 +490,7 @@ module.exports = {
   STAGES,
   getWarmupPlan,
   getPostWarmupPolicy,
+  sharedMoviraAllowance,
   WarmupLimitError,
   ensureProfileForDomain,
   evaluateAll,

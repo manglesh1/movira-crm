@@ -124,6 +124,14 @@ function verifyMovira(req) {
   return verifySharedSecret(req);
 }
 
+function verifyMeta(req) {
+  const secret = config.integrations.meta.appSecret;
+  const signature = String(req.headers["x-hub-signature-256"] || "");
+  if (!secret || !signature.startsWith("sha256=")) return false;
+  const expected = `sha256=${crypto.createHmac("sha256", secret).update(rawBody(req)).digest("hex")}`;
+  return timingSafeEqual(signature, expected);
+}
+
 function webhookAuth(provider) {
   return async function webhookAuthMiddleware(req, res, next) {
     try {
@@ -132,7 +140,8 @@ function webhookAuth(provider) {
           (provider === "ses" && req.body?.Signature) ||
           (provider === "mailgun" && config.webhooks.mailgunSigningKey) ||
           (provider === "sendgrid" && config.webhooks.sendgridPublicKey) ||
-          (provider === "postmark" && (config.webhooks.postmarkToken || config.webhooks.postmarkUsername));
+          (provider === "postmark" && (config.webhooks.postmarkToken || config.webhooks.postmarkUsername)) ||
+          (provider === "meta" && config.integrations.meta.appSecret);
         if (!hasProviderConfig) return next();
       }
 
@@ -142,6 +151,7 @@ function webhookAuth(provider) {
         sendgrid: verifySendgrid,
         postmark: verifyPostmark,
         movira: verifyMovira,
+        meta: verifyMeta,
       };
       const verifier = verifierByProvider[provider];
       if (!verifier) return unauthorized(res);
@@ -151,7 +161,8 @@ function webhookAuth(provider) {
         (provider === "mailgun" && config.webhooks.mailgunSigningKey) ||
         (provider === "sendgrid" && config.webhooks.sendgridPublicKey) ||
         (provider === "postmark" && (config.webhooks.postmarkToken || config.webhooks.postmarkUsername)) ||
-        (provider === "movira" && config.webhooks.sharedSecret);
+        (provider === "movira" && config.webhooks.sharedSecret) ||
+        (provider === "meta" && config.integrations.meta.appSecret);
       if (!configured) {
         const response = missingConfig(res, provider);
         if (response) return response;
@@ -167,4 +178,4 @@ function webhookAuth(provider) {
   };
 }
 
-module.exports = { webhookAuth };
+module.exports = { webhookAuth, _internal: { verifyMeta, timingSafeEqual, rawBody } };

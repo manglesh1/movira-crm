@@ -7,6 +7,7 @@ const queueMonitoringService = require("./queueMonitoringService");
 const sqsWorkerVerificationService = require("./sqsWorkerVerificationService");
 const sesWebhookService = require("../../webhooks/sesService");
 const auditService = require("../../audit/service");
+const rssCampaignService = require("./rssCampaignService");
 
 const router = express.Router();
 router.use(auth, authorizeLocation({
@@ -48,6 +49,26 @@ async function safeAudit(req, input) {
     req.log?.warn?.({ err, audit: input }, "audit log write skipped");
   }
 }
+
+router.get("/rss-campaigns", async (req, res, next) => {
+  try { res.json({ success: true, data: await rssCampaignService.list(req.query || {}) }); } catch (err) { if (err.statusCode) return sendError(res, err); return next(err); }
+});
+router.post("/rss-campaigns", async (req, res, next) => {
+  try {
+    const data = await rssCampaignService.create({ ...(req.body || {}), locationId: req.body?.locationId || req.query.locationId });
+    await safeAudit(req, { action: "rss_campaign_created", entityType: "rss_campaign", entityId: data.id, entityName: data.name, data });
+    res.status(201).json({ success: true, data });
+  } catch (err) { if (err.statusCode) return sendError(res, err); return next(err); }
+});
+router.patch("/rss-campaigns/:id", async (req, res, next) => {
+  try { res.json({ success: true, data: await rssCampaignService.update(req.params.id, { ...(req.body || {}), locationId: req.body?.locationId || req.query.locationId }) }); } catch (err) { if (err.statusCode) return sendError(res, err); return next(err); }
+});
+router.delete("/rss-campaigns/:id", async (req, res, next) => {
+  try { res.json({ success: true, data: await rssCampaignService.remove(req.params.id, req.query || {}) }); } catch (err) { if (err.statusCode) return sendError(res, err); return next(err); }
+});
+router.post("/rss-campaigns/:id/poll", async (req, res, next) => {
+  try { res.status(202).json({ success: true, data: await rssCampaignService.poll(req.params.id, { ...(req.body || {}), locationId: req.body?.locationId || req.query.locationId }) }); } catch (err) { if (err.statusCode) return sendError(res, err); return next(err); }
+});
 
 // ── Local Test Harness ─────────────────────────────────────────────
 

@@ -6,6 +6,7 @@
   "scripts": {
     "migrate": "npx sequelize-cli db:migrate",
     "migrate:undo": "npx sequelize-cli db:migrate:undo",
+    "credentials:rotate": "node scripts/rotateProviderCredentials.js",
     "seed": "npx sequelize-cli db:seed:all",
     "seed:undo": "npx sequelize-cli db:seed:undo",
     "predev": "npm run migrate && npm run seed",
@@ -17,8 +18,11 @@
     "worker:contacts": "MOVIRA_COMPONENT=contacts-worker node src/workers/contactsWorker.js",
     "worker:segments": "MOVIRA_COMPONENT=segments-worker node src/workers/segmentsWorker.js",
     "worker:automation": "MOVIRA_COMPONENT=automation-worker node src/workers/automationWorker.js",
+    "worker:conversations": "MOVIRA_COMPONENT=conversations-worker node src/workers/conversationsWorker.js",
+    "worker:rss": "MOVIRA_COMPONENT=rss-worker node src/workers/rssCampaignWorker.js",
+    "worker:email-health": "MOVIRA_COMPONENT=email-health-worker node src/workers/emailInfrastructureHealthWorker.js",
     "start": "node src/server.js",
-    "dev": "MOVIRA_COMPONENT=api nodemon src/server.js & API_PID=$!; MOVIRA_COMPONENT=transactional-worker node src/workers/transactionalWorker.js & TX_PID=$!; MOVIRA_COMPONENT=marketing-worker node src/workers/marketingWorker.js & MK_PID=$!; MOVIRA_COMPONENT=marketing-audience-worker node src/workers/marketingAudienceWorker.js & MA_PID=$!; MOVIRA_COMPONENT=webhooks-worker node src/workers/sesWebhookWorker.js & WH_PID=$!; MOVIRA_COMPONENT=warmup-worker node src/workers/senderWarmupWorker.js & WU_PID=$!; MOVIRA_COMPONENT=contacts-worker node src/workers/contactsWorker.js & CW_PID=$!; MOVIRA_COMPONENT=segments-worker node src/workers/segmentsWorker.js & SW_PID=$!; MOVIRA_COMPONENT=automation-worker node src/workers/automationWorker.js & AW_PID=$!; trap 'kill $API_PID $TX_PID $MK_PID $MA_PID $WH_PID $WU_PID $CW_PID $SW_PID $AW_PID 2>/dev/null' INT TERM EXIT; wait",
+    "dev": "MOVIRA_COMPONENT=api nodemon src/server.js & API_PID=$!; MOVIRA_COMPONENT=transactional-worker node src/workers/transactionalWorker.js & TX_PID=$!; MOVIRA_COMPONENT=marketing-worker node src/workers/marketingWorker.js & MK_PID=$!; MOVIRA_COMPONENT=marketing-audience-worker node src/workers/marketingAudienceWorker.js & MA_PID=$!; MOVIRA_COMPONENT=webhooks-worker node src/workers/sesWebhookWorker.js & WH_PID=$!; MOVIRA_COMPONENT=warmup-worker node src/workers/senderWarmupWorker.js & WU_PID=$!; MOVIRA_COMPONENT=contacts-worker node src/workers/contactsWorker.js & CW_PID=$!; MOVIRA_COMPONENT=segments-worker node src/workers/segmentsWorker.js & SW_PID=$!; MOVIRA_COMPONENT=automation-worker node src/workers/automationWorker.js & AW_PID=$!; MOVIRA_COMPONENT=conversations-worker node src/workers/conversationsWorker.js & CV_PID=$!; MOVIRA_COMPONENT=rss-worker node src/workers/rssCampaignWorker.js & RSS_PID=$!; MOVIRA_COMPONENT=email-health-worker node src/workers/emailInfrastructureHealthWorker.js & EH_PID=$!; trap 'kill $API_PID $TX_PID $MK_PID $MA_PID $WH_PID $WU_PID $CW_PID $SW_PID $AW_PID $CV_PID $RSS_PID $EH_PID 2>/dev/null' INT TERM EXIT; wait",
     "test": "node --test"
   },
   "keywords": [

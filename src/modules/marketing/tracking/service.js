@@ -191,9 +191,10 @@ async function recordClick(req, messageId, destinationUrl) {
   });
 }
 
-async function recordUnsubscribe(req, messageId) {
+async function recordUnsubscribe(req, messageId, { oneClick = false } = {}) {
   return recordMarketingEvent(messageId, "unsubscribe", {
-    source: "unsubscribe_link",
+    source: oneClick ? "one_click_unsubscribe" : "unsubscribe_link",
+    oneClick,
     ...requestContext(req),
   });
 }

@@ -88,7 +88,7 @@ async function pollQueue(queueUrl) {
         processedDelta: result?.skipped ? 0 : 1,
       }, logger);
     } catch (err) {
-      const isRateLimited = err.code === "MARKETING_RATE_LIMITED";
+      const isRateLimited = ["MARKETING_RATE_LIMITED", "MARKETING_CAPACITY_RESERVED", "PROVIDER_CAPACITY_HELD", "PROVIDER_QUOTA_UNAVAILABLE"].includes(err.code);
       const isPaused = err.code === "CAMPAIGN_PAUSED";
       logger[isRateLimited || isPaused ? "warn" : "error"](
         { err },

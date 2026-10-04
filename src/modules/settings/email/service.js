@@ -6,6 +6,8 @@ const { UNVERIFIED_TTL_DAYS } = require("../../../workers/unverifiedDomainCleane
 const emailProvider = require("../../messaging-core/providers/emailProviderRouter");
 const providerDomain = require("./providerDomainService");
 const warmupService = require("../../messaging-core/warmup/senderWarmupService");
+const { decryptJsonIfNeeded } = require("../../../shared/credentialVault");
+const config = require("../../../config");
 
 const ROUTE_DEFINITIONS = [
   { routeKey: "calendar", label: "Calendar Domain" },
@@ -20,7 +22,17 @@ const ROUTE_DEFINITIONS = [
 ];
 
 async function getEmailSettings({ locationId }) {
-  const { CrmProviderConfig, CrmEmailDomain, CrmEmailDomainRoute, CrmSenderWarmupProfile } = getModels();
+  const {
+    CrmProviderConfig,
+    CrmEmailDomain,
+    CrmEmailDomainRoute,
+    CrmSenderWarmupProfile,
+    CrmSenderWarmupEvent,
+    TransactionalDeliveryEvent,
+    TransactionalMessage,
+    CrmMarketingDeliveryEvent,
+    CrmMarketingMessage,
+  } = getModels();
   const scopedWhere = locationId ? { locationId: Number(locationId) } : {};
   const providers = await CrmProviderConfig.findAll({
     where: {
@@ -33,7 +45,7 @@ async function getEmailSettings({ locationId }) {
   const domains = locationId
     ? await CrmEmailDomain.findAll({
         where: { locationId: Number(locationId) },
-        include: [{ model: CrmSenderWarmupProfile, as: "warmupProfile", required: false }],
+        include: [warmupProfileInclude(CrmSenderWarmupProfile, CrmSenderWarmupEvent)],
         order: [["createdAt", "DESC"]],
       })
     : [];
@@ -45,6 +57,15 @@ async function getEmailSettings({ locationId }) {
     : [];
 
   const sharedMoviraUsage = getSharedMoviraUsage(domains);
+  const providerHealth = new Map(await Promise.all(providers.map(async (provider) => [
+    provider.id,
+    await providerWebhookHealth(provider, {
+      TransactionalDeliveryEvent,
+      TransactionalMessage,
+      CrmMarketingDeliveryEvent,
+      CrmMarketingMessage,
+    }),
+  ])));
   return {
     setupSteps: [
       { key: "default_provider", label: "Use Movira SES", status: "ready" },
@@ -54,11 +75,58 @@ async function getEmailSettings({ locationId }) {
     ],
     defaultProvider: PROVIDER_OPTIONS[0],
     providerOptions: PROVIDER_OPTIONS,
-    providers: providers.map(serializeProvider),
+    providers: providers.map((provider) => serializeProvider(provider, { webhookHealth: providerHealth.get(provider.id) })),
     activeProviderRoutes: buildActiveProviderRoutes(providers),
     domains: domains.map((row) => serializeDomain(row, { sharedMoviraUsage })),
     routes: routes.map(serializeRoute),
   };
+}
+
+async function providerWebhookHealth(provider, models) {
+  const providerKey = ({
+    customer_ses: "ses",
+    customer_sendgrid: "sendgrid",
+    customer_mailgun: "mailgun",
+    customer_postmark: "postmark",
+  })[provider.provider] || provider.provider;
+  const locationWhere = provider.locationId ? { locationId: Number(provider.locationId) } : {};
+  const [transactional, marketing] = await Promise.all([
+    models.TransactionalDeliveryEvent.findOne({
+      where: { provider: providerKey },
+      include: [{ model: models.TransactionalMessage, as: "message", required: true, where: locationWhere, attributes: [] }],
+      order: [["occurredAt", "DESC"]],
+    }),
+    models.CrmMarketingDeliveryEvent.findOne({
+      where: { provider: providerKey },
+      include: [{ model: models.CrmMarketingMessage, as: "message", required: true, where: locationWhere, attributes: [] }],
+      order: [["occurredAt", "DESC"]],
+    }),
+  ]);
+  const latest = [transactional, marketing]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt))[0] || null;
+  const guardConfigured = providerWebhookGuardConfigured(providerKey);
+  return {
+    status: latest ? "event_observed" : guardConfigured ? "awaiting_event" : "configuration_required",
+    signatureGuardConfigured: guardConfigured,
+    lastEventAt: latest?.occurredAt || null,
+    lastEventType: latest?.eventType || null,
+    note: latest
+      ? "A signed provider delivery event has been matched to this location."
+      : guardConfigured
+        ? "Webhook authentication is configured; send a test email and wait for its provider event."
+        : "Configure the production webhook authentication secret/key before sending.",
+  };
+}
+
+function providerWebhookGuardConfigured(providerKey) {
+  if (providerKey === "ses") return true;
+  if (providerKey === "sendgrid") return Boolean(config.webhooks.sendgridPublicKey);
+  if (providerKey === "mailgun") return Boolean(config.webhooks.mailgunSigningKey);
+  if (providerKey === "postmark") {
+    return Boolean(config.webhooks.postmarkToken || (config.webhooks.postmarkUsername && config.webhooks.postmarkPassword));
+  }
+  return false;
 }
 
 function buildActiveProviderRoutes(providers = []) {
@@ -183,7 +251,7 @@ async function createDomain(body = {}) {
 }
 
 async function listDomains({ locationId } = {}) {
-  const { CrmEmailDomain, CrmSenderWarmupProfile } = getModels();
+  const { CrmEmailDomain, CrmSenderWarmupProfile, CrmSenderWarmupEvent } = getModels();
   if (!locationId) {
     const err = new Error("locationId is required");
     err.statusCode = 400;
@@ -191,31 +259,32 @@ async function listDomains({ locationId } = {}) {
   }
   const rows = await CrmEmailDomain.findAll({
     where: { locationId: Number(locationId) },
-    include: [{ model: CrmSenderWarmupProfile, as: "warmupProfile", required: false }],
+    include: [warmupProfileInclude(CrmSenderWarmupProfile, CrmSenderWarmupEvent)],
     order: [["isDefault", "DESC"], ["createdAt", "DESC"]],
   });
   const sharedMoviraUsage = getSharedMoviraUsage(rows);
   return rows.map((row) => serializeDomain(row, { sharedMoviraUsage }));
 }
 
-async function getDomain(id) {
-  const { CrmEmailDomain, CrmSenderWarmupProfile } = getModels();
+async function getDomain(id, { locationId } = {}) {
+  const { CrmEmailDomain, CrmSenderWarmupProfile, CrmSenderWarmupEvent } = getModels();
   const row = await CrmEmailDomain.findByPk(id, {
-    include: [{ model: CrmSenderWarmupProfile, as: "warmupProfile", required: false }],
+    include: [warmupProfileInclude(CrmSenderWarmupProfile, CrmSenderWarmupEvent)],
   });
   if (!row) {
     const err = new Error("Domain not found");
     err.statusCode = 404;
     throw err;
   }
+  assertLocationOwnership(row, locationId, "Domain");
   const locationDomains = await CrmEmailDomain.findAll({
     where: { locationId: row.locationId },
-    include: [{ model: CrmSenderWarmupProfile, as: "warmupProfile", required: false }],
+    include: [warmupProfileInclude(CrmSenderWarmupProfile, CrmSenderWarmupEvent)],
   });
   return serializeDomain(row, { sharedMoviraUsage: getSharedMoviraUsage(locationDomains) });
 }
 
-async function deleteDomain(id) {
+async function deleteDomain(id, { locationId } = {}) {
   const { CrmEmailDomain, CrmEmailDomainRoute, CrmProviderConfig } = getModels();
   const row = await CrmEmailDomain.findByPk(id);
   if (!row) {
@@ -223,6 +292,7 @@ async function deleteDomain(id) {
     err.statusCode = 404;
     throw err;
   }
+  assertLocationOwnership(row, locationId, "Domain");
   // Detach this domain from any routes that reference it, then hard-delete
   // so the same domain string can be re-added without a 409 conflict.
   await CrmEmailDomainRoute.update(
@@ -245,7 +315,7 @@ async function deleteDomain(id) {
   return true;
 }
 
-async function setDefaultDomain(id) {
+async function setDefaultDomain(id, { locationId } = {}) {
   const { CrmEmailDomain } = getModels();
   const row = await CrmEmailDomain.findByPk(id);
   if (!row) {
@@ -253,6 +323,7 @@ async function setDefaultDomain(id) {
     err.statusCode = 404;
     throw err;
   }
+  assertLocationOwnership(row, locationId, "Domain");
   if (row.status !== "verified") {
     throwValidation([{ field: "domainId", message: "Verify this domain before setting it as default." }]);
   }
@@ -278,14 +349,15 @@ async function listDomainRoutes({ locationId } = {}) {
   return rows.map(serializeRoute);
 }
 
-async function verifyDomain(id) {
-  const { CrmEmailDomain, CrmProviderConfig, CrmSenderWarmupProfile } = getModels();
+async function verifyDomain(id, { locationId } = {}) {
+  const { CrmEmailDomain, CrmProviderConfig, CrmSenderWarmupProfile, CrmSenderWarmupEvent, CrmAuditLog } = getModels();
   const row = await CrmEmailDomain.findByPk(id);
   if (!row) {
     const err = new Error("Domain not found");
     err.statusCode = 404;
     throw err;
   }
+  assertLocationOwnership(row, locationId, "Domain");
   const providerConfig = row.providerConfigId ? await CrmProviderConfig.findByPk(row.providerConfigId) : null;
   let identity;
   try {
@@ -296,15 +368,34 @@ async function verifyDomain(id) {
       identityName: row.providerIdentityName,
     });
   } catch (err) {
-    const wrapped = new Error(`Domain verification lookup failed: ${err?.message || "unknown error"}`);
+    const message = `Domain verification lookup failed: ${err?.message || "unknown error"}`;
+    await row.update({
+      lastDnsCheckedAt: new Date(),
+      lastVerificationError: message,
+    });
+    const wrapped = new Error(message);
     wrapped.statusCode = err?.statusCode || 502;
     throw wrapped;
   }
 
   const seedRecords = identity.dnsRecords || [];
-  const { records: checked, allOk } = await verifyDomainRecords(seedRecords, row.domain);
+  let dnsResult;
+  try {
+    dnsResult = await verifyDomainRecords(seedRecords, row.domain);
+  } catch (err) {
+    const message = `DNS lookup failed: ${err?.message || "unknown error"}`;
+    await row.update({
+      lastDnsCheckedAt: new Date(),
+      lastVerificationError: message,
+    });
+    const wrapped = new Error(message);
+    wrapped.statusCode = err?.statusCode || 502;
+    throw wrapped;
+  }
+  const { records: checked, allOk } = dnsResult;
   const providerOk = Boolean(identity.providerVerified);
   const newStatus = allOk && providerOk ? "verified" : "verification_requested";
+  const previousStatus = row.status;
   const verificationMessage = !allOk
     ? "One or more DNS records are still pending."
     : !providerOk
@@ -323,10 +414,200 @@ async function verifyDomain(id) {
   if (newStatus === "verified") {
     await warmupService.ensureProfileForDomain(await CrmEmailDomain.findByPk(row.id));
   }
+  if (newStatus !== previousStatus && (newStatus === "verified" || previousStatus === "verified")) {
+    try {
+      await CrmAuditLog.create({
+        locationId: row.locationId,
+        action: newStatus === "verified" ? "email_domain_verified" : "email_domain_verification_lost",
+        entityType: "system",
+        entityId: String(row.id),
+        entityName: row.domain,
+        outcome: newStatus === "verified" ? "success" : "warning",
+        metadata: {
+          previousStatus,
+          status: newStatus,
+          message: verificationMessage,
+          customerVisible: true,
+        },
+      });
+    } catch (_auditError) {
+      // Verification must remain authoritative even if the audit store is temporarily unavailable.
+    }
+  }
   const fresh = await CrmEmailDomain.findByPk(row.id, {
-    include: [{ model: CrmSenderWarmupProfile, as: "warmupProfile", required: false }],
+    include: [warmupProfileInclude(CrmSenderWarmupProfile, CrmSenderWarmupEvent)],
   });
   return serializeDomain(fresh || row);
+}
+
+function warmupProfileInclude(CrmSenderWarmupProfile, CrmSenderWarmupEvent) {
+  return {
+    model: CrmSenderWarmupProfile,
+    as: "warmupProfile",
+    required: false,
+    include: [{
+      model: CrmSenderWarmupEvent,
+      as: "events",
+      required: false,
+      separate: true,
+      limit: 30,
+      order: [["createdAt", "DESC"]],
+    }],
+  };
+}
+
+async function updateWarmupControl(domainId, body = {}, { locationId } = {}) {
+  const { CrmEmailDomain, CrmSenderWarmupProfile, CrmSenderWarmupEvent } = getModels();
+  const domain = await CrmEmailDomain.findByPk(domainId);
+  if (!domain) {
+    const err = new Error("Domain not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  assertLocationOwnership(domain, locationId, "Domain");
+  const profile = await CrmSenderWarmupProfile.findOne({ where: { domainId: domain.id } });
+  if (!profile) {
+    const err = new Error("Warmup has not started for this domain.");
+    err.statusCode = 409;
+    throw err;
+  }
+  const action = String(body.action || "").trim().toLowerCase();
+  if (!['pause', 'resume'].includes(action)) {
+    throwValidation([{ field: "action", message: "Choose pause or resume." }]);
+  }
+  if (profile.status === "completed") {
+    const err = new Error("Completed warmup does not need a manual override.");
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const reason = String(body.reason || "").trim();
+  if (action === "pause" && reason.length < 3) {
+    throwValidation([{ field: "reason", message: "Add a short reason for the manual pause." }]);
+  }
+  await profile.update(action === "pause"
+    ? { status: "paused", pausedAt: new Date(), pausedReason: reason }
+    : { status: "active", pausedAt: null, pausedReason: null, lastEvaluatedAt: new Date() });
+  await CrmSenderWarmupEvent.create({
+    warmupProfileId: profile.id,
+    domainId: domain.id,
+    eventType: action === "pause" ? "manual_pause" : "manual_resume",
+    fromStage: profile.stage,
+    toStage: profile.stage,
+    reason: reason || "Warmup resumed by an administrator.",
+    metricsSnapshot: {
+      status: profile.status,
+      stage: profile.stage,
+      dailyLimit: profile.dailyLimit,
+      hourlyLimit: profile.hourlyLimit,
+      todaySent: profile.todaySent,
+      todayBounced: profile.todayBounced,
+      todayComplaints: profile.todayComplaints,
+    },
+  });
+  return getDomain(domain.id);
+}
+
+function isHealthCheckDue(lastCheckedAt, maxAgeMinutes, now = new Date()) {
+  if (!lastCheckedAt) return true;
+  const checkedAt = new Date(lastCheckedAt).getTime();
+  if (!Number.isFinite(checkedAt)) return true;
+  return now.getTime() - checkedAt >= Math.max(1, Number(maxAgeMinutes) || 1) * 60 * 1000;
+}
+
+function domainHealthCheckIntervalMinutes(row) {
+  return row?.status === "verified"
+    ? Number(process.env.EMAIL_VERIFIED_DOMAIN_RECHECK_MINUTES || 1440)
+    : Number(process.env.EMAIL_PENDING_DOMAIN_RECHECK_MINUTES || 60);
+}
+
+async function checkProviderHealth(providerOrId) {
+  const { CrmProviderConfig } = getModels();
+  const row = typeof providerOrId === "object" && providerOrId
+    ? providerOrId
+    : await CrmProviderConfig.findByPk(providerOrId);
+  if (!row) {
+    const err = new Error("Provider not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const checkedAt = new Date();
+  try {
+    const result = await verifyProviderConfig({
+      provider: row.provider,
+      config: decryptJsonIfNeeded(row.encryptedConfig),
+    });
+    await row.update({
+      lastTestedAt: checkedAt,
+      lastTestError: result.ok ? null : result.message,
+      verifiedAt: result.ok ? (row.verifiedAt || checkedAt) : row.verifiedAt,
+    });
+    return {
+      id: row.id,
+      provider: row.provider,
+      ok: Boolean(result.ok),
+      message: result.message,
+      checkedAt,
+    };
+  } catch (err) {
+    const message = err?.message || "Provider health check failed.";
+    await row.update({ lastTestedAt: checkedAt, lastTestError: message });
+    return { id: row.id, provider: row.provider, ok: false, message, checkedAt };
+  }
+}
+
+async function evaluateEmailInfrastructureHealth({
+  now = new Date(),
+  providerLimit = 100,
+  domainLimit = 100,
+} = {}) {
+  const { CrmProviderConfig, CrmEmailDomain } = getModels();
+  const providerRows = await CrmProviderConfig.findAll({
+    where: { channel: "email", isActive: true },
+    order: [["lastTestedAt", "ASC NULLS FIRST"], ["createdAt", "ASC"]],
+    limit: Math.max(1, Number(providerLimit) || 100),
+  });
+  const providerMaxAge = Number(process.env.EMAIL_PROVIDER_RECHECK_MINUTES || 1440);
+  const dueProviders = providerRows.filter((row) =>
+    isHealthCheckDue(row.lastTestedAt, providerMaxAge, now)
+  );
+
+  const domainRows = await CrmEmailDomain.findAll({
+    where: { isActive: true },
+    order: [["lastDnsCheckedAt", "ASC NULLS FIRST"], ["createdAt", "ASC"]],
+    limit: Math.max(1, Number(domainLimit) || 100),
+  });
+  const dueDomains = domainRows.filter((row) =>
+    isHealthCheckDue(row.lastDnsCheckedAt, domainHealthCheckIntervalMinutes(row), now)
+  );
+
+  const providers = [];
+  for (const row of dueProviders) providers.push(await checkProviderHealth(row));
+
+  const domains = [];
+  for (const row of dueDomains) {
+    try {
+      const result = await verifyDomain(row.id);
+      domains.push({
+        id: row.id,
+        domain: row.domain,
+        ok: result.status === "verified",
+        status: result.status,
+        message: result.lastVerificationError || null,
+      });
+    } catch (err) {
+      domains.push({
+        id: row.id,
+        domain: row.domain,
+        ok: false,
+        status: row.status,
+        message: err?.message || "Domain health check failed.",
+      });
+    }
+  }
+
+  return { providers, domains };
 }
 
 // Verify customer-supplied credentials BEFORE saving the provider row.
@@ -488,7 +769,7 @@ function humanizeFieldKey(key) {
     .trim();
 }
 
-async function testProvider(id, body = {}) {
+async function testProvider(id, body = {}, { locationId } = {}) {
   const { CrmProviderConfig } = getModels();
   const row = await CrmProviderConfig.findByPk(id);
   if (!row) {
@@ -496,6 +777,7 @@ async function testProvider(id, body = {}) {
     err.statusCode = 404;
     throw err;
   }
+  assertLocationOwnership(row, locationId, "Provider");
   if (!isEmail(body.to)) {
     await row.update({
       lastTestedAt: new Date(),
@@ -528,15 +810,16 @@ async function testProvider(id, body = {}) {
   return serializeProvider(await CrmProviderConfig.findByPk(id));
 }
 
-async function deleteProvider(id) {
+async function deleteProvider(id, { locationId } = {}) {
   const { CrmProviderConfig } = getModels();
   const row = await CrmProviderConfig.findByPk(id);
   if (!row) return false;
+  assertLocationOwnership(row, locationId, "Provider");
   await row.update({ isActive: false });
   return true;
 }
 
-async function updateDomainRoute(id, body = {}) {
+async function updateDomainRoute(id, body = {}, { locationId } = {}) {
   const { CrmEmailDomainRoute, CrmEmailDomain } = getModels();
   const row = await CrmEmailDomainRoute.findByPk(id);
   if (!row) {
@@ -544,6 +827,7 @@ async function updateDomainRoute(id, body = {}) {
     err.statusCode = 404;
     throw err;
   }
+  assertLocationOwnership(row, locationId, "Domain route");
 
   if (body.domainId) {
     const domain = await CrmEmailDomain.findByPk(body.domainId);
@@ -575,6 +859,14 @@ async function createProvider(body = {}) {
   const errors = validateProviderBody(body, option);
   if (errors.length) throwValidation(errors);
 
+  const verification = await verifyProviderConfig({ provider, config: body.config || {} });
+  if (!verification.ok) {
+    const err = new Error(verification.message || "Provider credentials could not be verified.");
+    err.statusCode = 422;
+    err.code = "PROVIDER_CREDENTIAL_VERIFICATION_FAILED";
+    throw err;
+  }
+
   const row = await CrmProviderConfig.create({
     locationId: body.locationId ? Number(body.locationId) : null,
     domain: body.domain || "marketing",
@@ -585,9 +877,21 @@ async function createProvider(body = {}) {
     isDefault: Boolean(body.isDefault),
     isActive: true,
     encryptedConfig: sanitizeConfig(body.config || {}, option.fields),
+    verifiedAt: new Date(),
+    lastTestedAt: new Date(),
+    lastTestError: null,
   });
 
   return serializeProvider(row);
+}
+
+function assertLocationOwnership(row, locationId, label = "Resource") {
+  if (locationId === undefined || locationId === null || locationId === "") return row;
+  if (Number(row.locationId) === Number(locationId)) return row;
+  const err = new Error(`${label} not found`);
+  err.statusCode = 404;
+  err.code = "LOCATION_RESOURCE_NOT_FOUND";
+  throw err;
 }
 
 function sanitizeConfig(config, allowedFields) {
@@ -610,7 +914,7 @@ function maskConfig(config = {}) {
   return masked;
 }
 
-function serializeProvider(row) {
+function serializeProvider(row, { webhookHealth = null } = {}) {
   const option = PROVIDER_OPTIONS.find((item) => item.provider === row.provider);
   return {
     id: row.id,
@@ -624,10 +928,11 @@ function serializeProvider(row) {
     priority: row.priority,
     isDefault: row.isDefault,
     isActive: row.isActive,
-    config: maskConfig(row.encryptedConfig),
+    config: maskConfig(decryptJsonIfNeeded(row.encryptedConfig)),
     verifiedAt: row.verifiedAt,
     lastTestedAt: row.lastTestedAt,
     lastTestError: row.lastTestError,
+    webhookHealth,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -636,8 +941,14 @@ function serializeProvider(row) {
 function serializeDomain(row, { sharedMoviraUsage } = {}) {
   const localPart = String(row.domain || "").split(".")[0] || "events";
   const profile = row.warmupProfile || null;
-  const todayLimit = Number(profile?.dailyLimit || 0);
   const completedOnSharedMovira = profile?.status === "completed" && row.provider === "movira_ses";
+  const sharedAllowance = warmupService.sharedMoviraAllowance(row.locationId);
+  const todayLimit = completedOnSharedMovira
+    ? Number(sharedAllowance.dailyLimit)
+    : Number(profile?.dailyLimit || 0);
+  const hourLimit = completedOnSharedMovira
+    ? Number(sharedAllowance.hourlyLimit)
+    : Number(profile?.hourlyLimit || 0);
   const todaySent = completedOnSharedMovira
     ? Number(sharedMoviraUsage?.todaySent ?? profile?.todaySent ?? 0)
     : Number(profile?.todaySent || 0);
@@ -649,12 +960,12 @@ function serializeDomain(row, { sharedMoviraUsage } = {}) {
         id: profile.id,
         status: profile.status,
         stage: profile.stage,
-        dailyLimit: profile.dailyLimit,
-        hourlyLimit: profile.hourlyLimit,
+        dailyLimit: todayLimit,
+        hourlyLimit: hourLimit,
         todaySent,
-        todayLimit: profile.dailyLimit,
+        todayLimit,
         currentHourSent,
-        hourLimit: profile.hourlyLimit,
+        hourLimit,
         todayDelivered: profile.todayDelivered,
         todayBounced: profile.todayBounced,
         todayComplaints: profile.todayComplaints,
@@ -668,6 +979,15 @@ function serializeDomain(row, { sharedMoviraUsage } = {}) {
         startedAt: profile.startedAt,
         completedAt: profile.completedAt,
         lastEvaluatedAt: profile.lastEvaluatedAt,
+        events: (profile.events || []).map((event) => ({
+          id: event.id,
+          eventType: event.eventType,
+          fromStage: event.fromStage,
+          toStage: event.toStage,
+          reason: event.reason,
+          metricsSnapshot: event.metricsSnapshot || {},
+          createdAt: event.createdAt,
+        })),
       }
     : null;
   // Unverified domains auto-expire UNVERIFIED_TTL_DAYS after creation —
@@ -687,7 +1007,7 @@ function serializeDomain(row, { sharedMoviraUsage } = {}) {
     status: row.status,
     dnsRecords: row.dnsRecords || [],
     warmupPlan: warmupService.getWarmupPlan(),
-    postWarmupPolicy: warmupService.getPostWarmupPolicy(row.provider),
+    postWarmupPolicy: warmupService.getPostWarmupPolicy(row.provider, row.locationId),
     senderName: row.senderName,
     senderEmail: row.senderEmail || (row.domain ? `${localPart}@${row.domain}` : null),
     providerIdentityName: row.providerIdentityName,
@@ -894,6 +1214,13 @@ module.exports = {
   listDomainRoutes,
   verifyDomain,
   verifyProviderConfig,
+  updateWarmupControl,
+  checkProviderHealth,
+  evaluateEmailInfrastructureHealth,
+  isHealthCheckDue,
+  domainHealthCheckIntervalMinutes,
+  providerWebhookGuardConfigured,
+  assertLocationOwnership,
   testProvider,
   deleteProvider,
   updateDomainRoute,

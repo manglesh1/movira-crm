@@ -277,6 +277,22 @@ async function retryMessage(messageId, body = {}) {
     throw err;
   }
 
+  const { TransactionalDeliveryEvent } = getModels();
+  const manualRetryLimit = Math.max(1, Number(process.env.TRANSACTIONAL_MANUAL_RETRY_LIMIT || 5));
+  const priorManualRetries = await TransactionalDeliveryEvent.count({
+    where: {
+      messageId: message.id,
+      eventType: { [Op.in]: ["retry_queued", "retry_enqueue_skipped"] },
+    },
+  });
+  if (priorManualRetries >= manualRetryLimit && body.overrideRetryLimit !== true) {
+    const err = new Error(`Manual retry limit reached (${manualRetryLimit}). Review the failure before overriding the limit.`);
+    err.statusCode = 409;
+    err.code = "MANUAL_RETRY_LIMIT_REACHED";
+    err.details = { priorManualRetries, manualRetryLimit, safeToOverride: true };
+    throw err;
+  }
+
   if (message.channel === "email") {
     const suppression = await suppressionService.isSuppressed(message.locationId, message.recipientAddress);
     if (suppression) {

@@ -16,6 +16,7 @@ function defineCrmQueueJob(sequelize) {
         defaultValue: "general",
       },
       jobType: { type: DataTypes.STRING(80), allowNull: false },
+      dedupeKey: { type: DataTypes.STRING(240), allowNull: true, unique: true },
       status: {
         type: DataTypes.STRING(40),
         allowNull: false,

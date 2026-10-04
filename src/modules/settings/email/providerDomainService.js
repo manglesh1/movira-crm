@@ -5,6 +5,7 @@ const {
   GetEmailIdentityCommand,
   PutEmailIdentityMailFromAttributesCommand,
 } = require("@aws-sdk/client-sesv2");
+const { decryptJsonIfNeeded } = require("../../../shared/credentialVault");
 const config = require("../../../config");
 const moviraSesIdentity = require("./sesIdentityService");
 
@@ -88,7 +89,7 @@ async function refreshCustomerSes(providerConfig, domain, identityName) {
 }
 
 function customerSesClient(providerConfig) {
-  const cfg = providerConfig?.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerConfig?.encryptedConfig);
   if (!cfg.region || !cfg.accessKeyId || !cfg.secretAccessKey) {
     throw httpError(400, "Customer SES provider is missing region, access key, or secret key.");
   }
@@ -151,7 +152,7 @@ async function deleteCustomerSesIdentity(providerConfig, domain) {
 }
 
 async function createSendGridDomain(providerConfig, domain) {
-  const cfg = providerConfig?.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerConfig?.encryptedConfig);
   if (!cfg.apiKey) throw httpError(400, "SendGrid provider is missing an API key.");
   const existing = await sendGridRequest(cfg.apiKey, `/v3/whitelabel/domains?domain=${encodeURIComponent(domain)}`, { method: "GET" });
   const found = Array.isArray(existing) ? existing.find((item) => item.domain === domain) : null;
@@ -167,7 +168,7 @@ async function createSendGridDomain(providerConfig, domain) {
 }
 
 async function refreshSendGridDomain(providerConfig, identityName) {
-  const cfg = providerConfig?.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerConfig?.encryptedConfig);
   if (!cfg.apiKey) throw httpError(400, "SendGrid provider is missing an API key.");
   const row = await sendGridRequest(cfg.apiKey, `/v3/whitelabel/domains/${identityName}`, { method: "GET" });
   return sendGridPayload(row.domain, row);
@@ -214,7 +215,7 @@ async function sendGridRequest(apiKey, path, { method = "GET", body } = {}) {
 }
 
 async function getMailgunDomain(providerConfig, domain) {
-  const cfg = providerConfig?.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerConfig?.encryptedConfig);
   if (!cfg.apiKey) throw httpError(400, "Mailgun provider is missing an API key.");
   const region = cfg.region || "us";
   const base = region === "eu" ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
@@ -253,7 +254,7 @@ function mailgunRecords(data) {
 }
 
 async function createPostmarkDomain(providerConfig, domain) {
-  const cfg = providerConfig?.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerConfig?.encryptedConfig);
   if (!cfg.serverToken) throw httpError(400, "Postmark provider is missing a server token.");
   const created = await postmarkRequest(cfg.serverToken, "/domains", {
     method: "POST",
@@ -265,7 +266,7 @@ async function createPostmarkDomain(providerConfig, domain) {
 }
 
 async function refreshPostmarkDomain(providerConfig, identityName) {
-  const cfg = providerConfig?.encryptedConfig || {};
+  const cfg = decryptJsonIfNeeded(providerConfig?.encryptedConfig);
   if (!cfg.serverToken) throw httpError(400, "Postmark provider is missing a server token.");
   const row = await postmarkRequest(cfg.serverToken, `/domains/${identityName}`, { method: "GET" });
   return {

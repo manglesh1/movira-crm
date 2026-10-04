@@ -80,6 +80,15 @@ const config = {
   },
   integrations: {
     coreApiBaseUrl: (process.env.MOVIRA_CORE_API_BASE_URL || (process.env.NODE_ENV === "production" ? "" : "http://127.0.0.1:5171/api")).replace(/\/+$/, ""),
+    meta: {
+      appId: process.env.META_APP_ID || "",
+      appSecret: process.env.META_APP_SECRET || "",
+      graphVersion: process.env.META_GRAPH_VERSION || "v24.0",
+      oauthRedirectUri: process.env.META_OAUTH_REDIRECT_URI || "",
+      oauthSuccessRedirect: process.env.META_OAUTH_SUCCESS_REDIRECT || "",
+      scopes: String(process.env.META_OAUTH_SCOPES || "pages_show_list,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_messages")
+        .split(",").map((value) => value.trim()).filter(Boolean),
+    },
   },
   webhooks: {
     sharedSecret: process.env.CRM_WEBHOOK_SHARED_SECRET || "",
@@ -88,7 +97,11 @@ const config = {
     postmarkToken: process.env.POSTMARK_WEBHOOK_TOKEN || "",
     postmarkUsername: process.env.POSTMARK_WEBHOOK_USERNAME || "",
     postmarkPassword: process.env.POSTMARK_WEBHOOK_PASSWORD || "",
+    metaVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || "",
   },
+  credentialsEncryptionKey: process.env.CRM_CREDENTIALS_ENCRYPTION_KEY || "",
+  credentialsEncryptionKeyId: process.env.CRM_CREDENTIALS_ENCRYPTION_KEY_ID || "primary",
+  credentialsPreviousEncryptionKeys: process.env.CRM_CREDENTIALS_PREVIOUS_KEYS || "{}",
   aws: {
     region: awsRegionEnv("AWS_REGION", "us-east-1"),
     queues: {
@@ -106,6 +119,13 @@ const config = {
       marketingConfigSet: process.env.SES_MARKETING_CONFIG_SET || "movira-marketing",
       defaultFrom: process.env.SES_DEFAULT_FROM || "no-reply@movira.app",
       domainProvisioningEnabled: booleanEnv("SES_DOMAIN_PROVISIONING_ENABLED", true),
+      capacity: {
+        enforcementEnabled: booleanEnv("SES_GLOBAL_CAPACITY_ENFORCEMENT", process.env.NODE_ENV === "production"),
+        snapshotTtlSeconds: Number(process.env.SES_CAPACITY_SNAPSHOT_TTL_SECONDS || 60),
+        reservationTtlSeconds: Number(process.env.SES_CAPACITY_RESERVATION_TTL_SECONDS || 300),
+        transactionalReservePercent: Number(process.env.SES_TRANSACTIONAL_CAPACITY_RESERVE_PERCENT || 20),
+        safetyMarginPercent: Number(process.env.SES_CAPACITY_SAFETY_MARGIN_PERCENT || 5),
+      },
     },
     s3: {
       marketingAssetsBucket: process.env.S3_MARKETING_ASSETS_BUCKET || "",
@@ -124,6 +144,13 @@ const config = {
   queueJobs: {
     pollMs: Number(process.env.CRM_QUEUE_WORKER_POLL_MS || 2000),
     batchSize: Number(process.env.CRM_QUEUE_WORKER_BATCH_SIZE || 10),
+    staleLockMs: Number(process.env.CRM_QUEUE_WORKER_STALE_LOCK_MS || 10 * 60 * 1000),
+  },
+  conversations: {
+    workerPollMs: Number(process.env.CONVERSATIONS_WORKER_POLL_MS || 1500),
+    workerBatchSize: Number(process.env.CONVERSATIONS_WORKER_BATCH_SIZE || 10),
+    outboundMaxAttempts: Number(process.env.CONVERSATIONS_OUTBOUND_MAX_ATTEMPTS || 6),
+    staleLockMs: Number(process.env.CONVERSATIONS_STALE_LOCK_MS || 5 * 60 * 1000),
   },
   // Org-level sender/business identity injected as default {{business.*}} merge
   // data for marketing sends (compliance footer). Per-campaign body.data.business
