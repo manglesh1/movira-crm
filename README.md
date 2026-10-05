@@ -145,7 +145,7 @@ Without SQS URLs, message rows are created with status `enqueue_skipped` — han
 
 ## Frontend
 
-Both transactional and marketing UIs live in [my-admin-app](../my-admin-app/):
+Both transactional and marketing UIs live in [movira-admin](../movira-admin/):
 
 - `/crm/marketing?tab=templates&templateType=transactional` — transactional templates (33 system + custom variants), family-grouped
 - `/crm/marketing?tab=templates&templateType=marketing` — marketing templates
@@ -156,7 +156,7 @@ Both transactional and marketing UIs live in [my-admin-app](../my-admin-app/):
 
 ## Calling from aeroSportsAdmin
 
-Producer code uses the [crmNotify helper](../aeroSportsAdmin/services/crmNotify/index.js):
+Producer code uses the [crmNotify helper](../movira-platform-admin/services/crmNotify/index.js):
 
 ```js
 const crm = require("./services/crmNotify");
@@ -172,4 +172,4 @@ await crm.send({
 });
 ```
 
-See [aeroSportsAdmin/docs/crmNotify.md](../aeroSportsAdmin/docs/crmNotify.md).
+See [movira-platform-admin/docs/crmNotify.md](../movira-platform-admin/docs/crmNotify.md).
