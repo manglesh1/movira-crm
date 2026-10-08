@@ -27,7 +27,7 @@ function threadKey(input, fromEmail) {
 }
 
 async function ingest(input = {}) {
-  const locationId = Number(input.locationId || input.location_id);
+  const locationId = Number(input.locationId);
   const fromEmail = cleanEmail(input.from?.email || input.from || input.sender);
   const toEmail = cleanEmail(input.to?.email || input.to || input.recipient);
   const providerMessageId = String(input.providerMessageId || input.messageId || input.message_id || "").trim().slice(0, 255);

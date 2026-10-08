@@ -4,20 +4,22 @@ const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
 // inlined by the design generator because several major email clients still do
 // not reliably support CSS custom properties.
 const BRAND = Object.freeze({
-  primary: "#0A66C2",
-  primaryHover: "#0755A3",
-  cyan: "#20AEE5",
-  navy: "#071C2C",
-  hero: "#0D3B56",
-  navySoft: "#103A56",
-  canvas: "#F3F7FA",
+  primary: "#7220E6",
+  primaryHover: "#480D9A",
+  cyan: "#A66BFF",
+  navy: "#24113F",
+  hero: "#480D9A",
+  navySoft: "#5C1AB1",
+  canvas: "#F8F6FC",
   surface: "#FFFFFF",
-  soft: "#EDF5FA",
-  border: "#C3D6E4",
-  divider: "#E3ECF2",
-  text: "#142B3B",
-  muted: "#667B8A",
+  soft: "#F3ECFD",
+  border: "#D9C7F3",
+  divider: "#E9DFF7",
+  text: "#241A33",
+  muted: "#756A82",
   white: "#FFFFFF",
+  onDarkMuted: "#EEE4FC",
+  shadow: "rgba(72,13,154,.10)",
   success: "#08745B",
   successSoft: "#E9F7F2",
   warning: "#936000",
@@ -153,7 +155,7 @@ function footer(id, content, settings = {}) {
 function styleVars(profile) {
   return `
     <style>
-      .txn-card{border:.5px solid ${BRAND.border};border-radius:13px;overflow:hidden;background:${BRAND.surface};box-shadow:0 8px 24px rgba(7,28,44,.06);}
+      .txn-card{border:.5px solid ${BRAND.border};border-radius:13px;overflow:hidden;background:${BRAND.surface};box-shadow:0 8px 24px ${BRAND.shadow};}
       .txn-row{border-bottom:.5px solid ${BRAND.divider};}
       .txn-label{font-family:${FONT_STACK};font-size:9px;color:${BRAND.muted};text-transform:uppercase;letter-spacing:.11em;font-weight:700;}
       .txn-value{font-family:${FONT_STACK};font-size:13px;color:${BRAND.text};font-weight:650;line-height:1.45;letter-spacing:-.01em;}
@@ -670,7 +672,7 @@ function buildTransactionalSystemDesign(row = {}) {
       containerMarginTop: 24,
       containerMarginBottom: 24,
       customCss:
-        `.mframe{box-shadow:0 18px 50px rgba(7,28,44,.10);}@media only screen and (max-width:480px){.txn-total{font-size:18px!important}.txn-card{border-radius:10px!important}.msec_sys_hero{padding:21px 18px!important}.msec_sys_main{padding:18px 14px!important}.msec_sys_header{padding:13px 14px!important}}`,
+        `.mframe{box-shadow:0 18px 50px ${BRAND.shadow};}@media only screen and (max-width:480px){.txn-total{font-size:18px!important}.txn-card{border-radius:10px!important}.msec_sys_hero{padding:21px 18px!important}.msec_sys_main{padding:18px 14px!important}.msec_sys_header{padding:13px 14px!important}}`,
     },
     sections: [
       section("sys_brand_rail", "2", { backgroundColor: BRAND.primary, padding: { top: 0, right: 0, bottom: 0, left: 0 } }, [
@@ -721,7 +723,7 @@ function buildTransactionalSystemDesign(row = {}) {
         column("sys_hero_copy", showQr ? "72%" : "100%", [
           text("sys_event_label", profile.label.toUpperCase(), { fontSize: 9, letterSpacing: ".14em", fontWeight: 700, color: BRAND.cyan, padding: { top: 0, right: 10, bottom: 8, left: 0 } }),
           heading("sys_heading", headingText, { fontSize: 23, lineHeight: "1.2", letterSpacing: "-.025em", fontWeight: 750, color: BRAND.white, padding: { top: 0, right: 10, bottom: 9, left: 0 } }),
-          text("sys_intro", paragraph, { fontSize: 12, lineHeight: "1.6", fontWeight: 400, color: "#D7E5EE", padding: { top: 0, right: 10, bottom: 0, left: 0 } }),
+          text("sys_intro", paragraph, { fontSize: 12, lineHeight: "1.6", fontWeight: 400, color: BRAND.onDarkMuted, padding: { top: 0, right: 10, bottom: 0, left: 0 } }),
         ]),
         ...(showQr
           ? [
@@ -801,7 +803,7 @@ function buildTransactionalSystemDesign(row = {}) {
       ]),
       section("sys_powered", "1", { backgroundColor: BRAND.navy, padding: { top: 11, right: 22, bottom: 12, left: 22 } }, [
         column("sys_powered_col", "100%", [
-          footer("sys_powered_text", `Powered by <a href="{{movira360Url}}" style="color:${BRAND.cyan};text-decoration:none;font-weight:750;">Movira360</a><span style="color:#7EA2BA;"> &nbsp;•&nbsp; Smart venue operations</span>`, {
+          footer("sys_powered_text", `Powered by <a href="{{movira360Url}}" style="color:${BRAND.cyan};text-decoration:none;font-weight:750;">Movira360</a><span style="color:${BRAND.onDarkMuted};"> &nbsp;•&nbsp; Smart venue operations</span>`, {
             align: "center",
             fontSize: 10,
             color: BRAND.white,

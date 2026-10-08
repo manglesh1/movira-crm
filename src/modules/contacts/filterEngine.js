@@ -417,6 +417,7 @@ function searchFragment(term) {
   const text = String(term || "").trim();
   if (!text) return null;
   const esc = `%${escapeLike(text.slice(0, 120))}%`;
+  const phoneDigits = text.replace(/\D/g, "");
   return {
     [Op.or]: [
       { fullName: { [Op.iLike]: esc } },
@@ -424,6 +425,7 @@ function searchFragment(term) {
       { lastName: { [Op.iLike]: esc } },
       { email: { [Op.iLike]: esc } },
       { phone: { [Op.iLike]: esc } },
+      ...(phoneDigits.length >= 3 ? [{ normalizedPhone: { [Op.iLike]: `%${escapeLike(phoneDigits)}%` } }] : []),
     ],
   };
 }

@@ -167,7 +167,7 @@ await crm.send({
   data: { guestName, bookingNumber, venueName, ... },
   attachments: [{ filename: "invoice.pdf", content: pdfBuffer, contentType: "application/pdf" }],
   idempotencyKey: `booking.confirmed:${bookingId}`,
-  venueId: location.locationId,
+  locationId: location.locationId,
   priority: crm.PRIORITY.HIGH,
 });
 ```

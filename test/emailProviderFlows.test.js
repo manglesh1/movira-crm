@@ -40,7 +40,7 @@ const emailInput = {
   bcc: ["audit@example.test", "ops@example.test"],
   trackingTags: [
     { name: "template_id", value: "tpl_1" },
-    { name: "location_id", value: "15" },
+    { name: "locationId", value: "15" },
   ],
   headers: {
     "List-Unsubscribe": "<https://crm.example.test/m/unsubscribe/msg_tx_123>",
@@ -86,7 +86,7 @@ test("customer SES provider sends transactional metadata tags", async () => {
     { Name: "domain", Value: "transactional" },
     { Name: "message_id", Value: "msg_tx_123" },
     { Name: "template_id", Value: "tpl_1" },
-    { Name: "location_id", Value: "15" },
+    { Name: "locationId", Value: "15" },
   ]);
 });
 

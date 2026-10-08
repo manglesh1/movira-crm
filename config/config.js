@@ -7,7 +7,11 @@ if (process.env.NODE_ENV === "production" && !process.env.MOVIRA_CRM_DATABASE_UR
 const base = {
   dialect: "postgres",
   logging: false,
+  migrationStorage: "sequelize",
+  migrationStorageTableName: "SequelizeMetaCrm",
   migrationStorageTableSchema: "public",
+  seederStorage: "sequelize",
+  seederStorageTableName: "SequelizeDataCrm",
   seederStorageTableSchema: "public",
 };
 

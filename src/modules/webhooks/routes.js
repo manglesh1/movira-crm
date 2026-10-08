@@ -68,7 +68,7 @@ router.post("/sendgrid", webhookAuth("sendgrid"), async (req, res, next) => {
 router.post("/movira/customer", webhookAuth("movira"), async (req, res, next) => {
   try {
     const data = await contactsService.processMoviraCustomerWebhook(req.body || {});
-    const locationId = data.job?.locationId || req.body?.locationId || req.body?.location_id;
+    const locationId = data.job?.locationId || req.body?.locationId;
     data.automation = await queueJobs.enqueueAutomationEvents(data.automationEvents || [], {
       locationId,
       source: "movira_webhook",

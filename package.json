@@ -4,7 +4,7 @@
   "description": "Movira CRM communication service for transactional messaging and marketing CRM.",
   "main": "src/server.js",
   "scripts": {
-    "migrate": "npx sequelize-cli db:migrate",
+    "migrate": "node scripts/adoptExistingCrmMigrationHistory.js && npx sequelize-cli db:migrate",
     "migrate:undo": "npx sequelize-cli db:migrate:undo",
     "credentials:rotate": "node scripts/rotateProviderCredentials.js",
     "seed": "npx sequelize-cli db:seed:all",
@@ -44,6 +44,7 @@
     "helmet": "^8.1.0",
     "ioredis": "^5.6.1",
     "jsonwebtoken": "^9.0.2",
+    "libphonenumber-js": "^1.13.14",
     "nodemailer": "^8.0.7",
     "pg": "^8.14.1",
     "pino": "^9.5.0",

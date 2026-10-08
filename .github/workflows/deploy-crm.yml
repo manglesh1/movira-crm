@@ -97,8 +97,8 @@ jobs:
 
           cd /opt/movira/crm
           npm install --no-audit --no-fund
-          npx sequelize-cli db:migrate
-          npx sequelize-cli db:seed:all
+          npm run migrate
+          npm run seed
           PENDING_MIGRATIONS="\$(npx sequelize-cli db:migrate:status | awk '\$1 == "down" { count += 1 } END { print count + 0 }')"
           if [ "\${PENDING_MIGRATIONS}" -ne 0 ]; then
             echo "CRM deployment blocked: \${PENDING_MIGRATIONS} pending migration(s)."

@@ -9,6 +9,7 @@ const contactFieldService = require("../contactFields/service");
 const exportStorage = require("./exportStorage");
 const filterEngine = require("./filterEngine");
 const catalog = require("./fieldCatalog");
+const { normalizePhoneNumber } = require("../../utils/phoneNumber");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_SOURCE_TYPES = new Set(["movira", "csv", "manual", "form", "api", "webhook", "imported"]);
@@ -47,9 +48,8 @@ function normalizeEmail(email) {
   return value || null;
 }
 
-function normalizePhone(phone) {
-  const value = String(phone || "").replace(/[^\d+]/g, "").trim();
-  return value || null;
+function normalizePhone(phone, locationCountry) {
+  return normalizePhoneNumber(phone, locationCountry);
 }
 
 function cleanString(value, max = 240) {
@@ -202,8 +202,11 @@ function contactPayload(input = {}, locationId) {
   const names = splitName(input);
   const email = cleanString(input.email || input.guestEmail, 320);
   const normalizedEmail = normalizeEmail(email);
-  const phone = cleanString(input.phone || input.guestPhone, 60);
-  const normalizedPhone = normalizePhone(phone);
+  const rawPhone = cleanString(input.phone || input.guestPhone, 60);
+  const locationCountry = input.locationCountry || input.sourceSnapshot?.locationCountry || input.country;
+  const normalizedPhone = normalizePhone(rawPhone, locationCountry);
+  if (rawPhone && !normalizedPhone) throw badRequest(`Enter a valid phone number for the ${locationCountry || "selected location"}.`);
+  const phone = normalizedPhone;
   const sourceType = cleanString(input.sourceType || input.source || "manual", 40) || "manual";
   const lifecycle = cleanString(input.lifecycle || input.type || "lead", 40) || "lead";
   const marketingStatus = cleanString(input.marketingStatus || "subscribed", 40) || "subscribed";
@@ -358,10 +361,12 @@ async function listContacts(query = {}) {
   if (query.sourceType) where.sourceType = cleanString(query.sourceType, 40);
   if (query.marketingStatus) where.marketingStatus = cleanString(query.marketingStatus, 40);
   if (q) {
+    const phoneDigits = q.replace(/\D/g, "");
     where[Op.or] = [
       { fullName: { [Op.iLike]: `%${q}%` } },
       { email: { [Op.iLike]: `%${q}%` } },
       { phone: { [Op.iLike]: `%${q}%` } },
+      ...(phoneDigits.length >= 3 ? [{ normalizedPhone: { [Op.iLike]: `%${phoneDigits}%` } }] : []),
     ];
   }
 
@@ -540,7 +545,7 @@ function normalizeMoviraWebhookRows(input = {}) {
 }
 
 function resolveWebhookLocationId(input = {}, row = {}) {
-  return input.locationId || input.location_id || input.venueId || input.venue_id || row.locationId || row.location_id || row.venueId || row.venue_id || row.location?.id;
+  return input.locationId || row.locationId || row.location?.id;
 }
 
 async function processMoviraCustomerWebhook(input = {}) {

@@ -19,8 +19,7 @@ router.post("/internal/sync", internalAuth, async (req, res, next) => {
         data,
       });
     }
-    const locationId =
-      data.job?.locationId || req.body?.locationId || req.body?.location_id;
+    const locationId = data.job?.locationId || req.body?.locationId;
     data.automation = await queueJobs.enqueueAutomationEvents(
       data.automationEvents || [],
       { locationId, source: "core_customer_sync" }

@@ -41,7 +41,7 @@ test("web chat visitor data rejects invalid contact details and strips unsafe ex
   assert.deepEqual(webchat._internal.safeVisitor({ name: "  Maya  ", email: "MAYA@EXAMPLE.COM", phone: "+1 416 555 0123" }), {
     name: "Maya",
     email: "maya@example.com",
-    phone: "+1 416 555 0123",
+    phone: "+14165550123",
     pageUrl: "",
   });
 });

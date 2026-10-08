@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   nameField: "required",
   emailField: "required",
   phoneField: "hidden",
+  locationCountry: "Canada",
   collectName: true,
   collectEmail: true,
   collectPhone: false,
@@ -81,6 +82,7 @@ function normalizeSettings(input = {}) {
     nameField,
     emailField,
     phoneField,
+    locationCountry: cleanText(input.locationCountry, 100, DEFAULT_SETTINGS.locationCountry),
     collectName: nameField !== "hidden",
     collectEmail: emailField !== "hidden",
     collectPhone: phoneField !== "hidden",
@@ -199,11 +201,12 @@ function tokenHash(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
 }
 
-function safeVisitor(input = {}) {
+function safeVisitor(input = {}, locationCountry = "Canada") {
   const email = cleanText(input.email, 320).toLowerCase();
-  const phone = cleanText(input.phone, 30);
+  const rawPhone = cleanText(input.phone, 30);
+  const phone = rawPhone ? require("../../utils/phoneNumber").normalizePhoneNumber(rawPhone, locationCountry) : null;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw serviceError("Enter a valid email address.", 400, "invalid_email");
-  if (phone && !/^[+()\d\s.-]{7,30}$/.test(phone)) throw serviceError("Enter a valid phone number.", 400, "invalid_phone");
+  if (rawPhone && !phone) throw serviceError(`Enter a valid phone number for ${locationCountry}.`, 400, "invalid_phone");
   return {
     name: cleanText(input.name, 120, "Website visitor"),
     email,
@@ -227,16 +230,17 @@ function enforceVisitorRequirements(settings, input, safe) {
 async function startSession({ widgetKey, origin, visitor = {}, sessionToken }) {
   const connection = await findPublicConnection(widgetKey);
   assertOriginAllowed(connection, origin);
+  const settings = settingsFor(connection);
   const models = getModels();
   if (sessionToken) {
     const existing = await models.CrmConversation.findOne({
       where: { connectionId: connection.id, "metadataSafe.sessionTokenHash": tokenHash(sessionToken) },
     });
-    if (existing) return { sessionToken, conversationId: existing.id, visitor: existing.metadataSafe?.visitor || safeVisitor(visitor) };
+    if (existing) return { sessionToken, conversationId: existing.id, visitor: existing.metadataSafe?.visitor || safeVisitor(visitor, settings.locationCountry) };
   }
 
-  const safe = safeVisitor(visitor);
-  enforceVisitorRequirements(settingsFor(connection), visitor, safe);
+  const safe = safeVisitor(visitor, settings.locationCountry);
+  enforceVisitorRequirements(settings, visitor, safe);
   const rawToken = crypto.randomBytes(32).toString("base64url");
   const externalUserId = `visitor_${crypto.randomBytes(16).toString("base64url")}`;
   const externalThreadId = `thread_${crypto.randomBytes(16).toString("base64url")}`;

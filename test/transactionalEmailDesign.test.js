@@ -20,6 +20,9 @@ const CASES = [
 ];
 
 test("system transactional designs use the global Movira360 frame and event content", () => {
+  assert.equal(BRAND.primary, "#7220E6");
+  assert.equal(BRAND.primaryHover, "#480D9A");
+
   for (const [key, family, expectedTitle] of CASES) {
     const design = buildTransactionalSystemDesign({
       key,
@@ -35,7 +38,11 @@ test("system transactional designs use the global Movira360 frame and event cont
     assert.equal(design.settings.containerBorderWidth, 0.5);
     assert.equal(design.settings.containerBorderColor, BRAND.border);
     assert.equal(design.settings.buttonColor, BRAND.primary);
+    assert.equal(design.settings.backgroundColor, BRAND.canvas);
     assert.match(serialized, /Movira360/);
+    assert.match(serialized, /#7220E6/);
+    assert.match(serialized, /#480D9A/);
+    assert.doesNotMatch(serialized, /#0A66C2|#0755A3|#20AEE5|#071C2C|#0D3B56|#103A56/);
     assert.match(serialized, new RegExp(expectedTitle));
     assert.match(serialized, /Powered by/);
     assert.match(buildTransactionalPlainText({ key, family }), /Powered by Movira360/);
