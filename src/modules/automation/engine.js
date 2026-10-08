@@ -57,7 +57,7 @@ function step(node, status, detail) {
 }
 
 async function executeNode(node, ctx) {
-  const { models, contact, locationId, dryRun } = ctx;
+  const { contact, locationId, dryRun } = ctx;
   const actionId = node.actionId || node.type;
   const config = node.config || {};
 
@@ -96,7 +96,7 @@ async function executeNode(node, ctx) {
     }
     case "internal_note": {
       const body = applyMerge(config.note || "Automation note", contact);
-      if (!dryRun) await models.CrmContactNote.create({ contactId: contact.id, locationId, body, authorName: "Automation" });
+      if (!dryRun) await ctx.models.CrmContactNote.create({ contactId: contact.id, locationId, body, authorName: "Automation" });
       return step(node, "success", "Note added to customer");
     }
     case "send_email": {
@@ -176,10 +176,18 @@ async function runSequence(nodeList, ctx, steps) {
 }
 
 // Execute a workflow for one contact. Returns { steps, status, currentNodeId }.
-async function runForContact(workflow, contact, { dryRun = false, nodesOverride = null } = {}) {
-  const models = getModels();
+async function runForContact(workflow, contact, { dryRun = false, nodesOverride = null, models = null } = {}) {
+  let resolvedModels = models;
   const nodes = Array.isArray(nodesOverride) ? nodesOverride : (Array.isArray(workflow.nodes) ? workflow.nodes : []);
-  const ctx = { models, contact, locationId: workflow.locationId, dryRun };
+  const ctx = {
+    get models() {
+      if (!resolvedModels) resolvedModels = getModels();
+      return resolvedModels;
+    },
+    contact,
+    locationId: workflow.locationId,
+    dryRun,
+  };
   const steps = [];
   const result = await runSequence(nodes, ctx, steps);
   return {
