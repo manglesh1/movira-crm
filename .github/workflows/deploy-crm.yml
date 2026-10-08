@@ -30,27 +30,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inspect AWS OIDC trust subject
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import base64
-          import json
-          import os
-          import urllib.request
-
-          request = urllib.request.Request(
-              f"{os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']}&audience=sts.amazonaws.com",
-              headers={"Authorization": f"Bearer {os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']}"},
-          )
-          with urllib.request.urlopen(request) as response:
-              token = json.load(response)["value"]
-          encoded = token.split(".")[1]
-          encoded += "=" * (-len(encoded) % 4)
-          claims = json.loads(base64.urlsafe_b64decode(encoded))
-          print(json.dumps({key: claims.get(key) for key in ("sub", "aud", "repository", "ref")}, indent=2))
-          PY
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
