@@ -97,3 +97,42 @@ test("rendered onboarding email has full frame, logo colors and no unresolved co
   assert.match(rendered.body, /Powered by/);
   assert.doesNotMatch(rendered.body, /\{\{\s*(guestName|venueName)\s*\}\}/);
 });
+
+test("Movira Control invoice uses platform support once and renders an explicit total", () => {
+  const designJson = buildTransactionalSystemDesign({
+    key: "saasInvoiceIssued",
+    family: "saas",
+    name: "SaaS invoice issued",
+    defaults: {
+      heading: "Your Movira invoice is ready",
+      paragraph: "Hi {{guestName}}, review invoice {{invoiceNumber}} below.",
+    },
+  });
+  const rendered = renderTemplate(
+    {
+      name: "SaaS invoice issued",
+      subject: "Invoice {{invoiceNumber}} for {{locationName}}",
+      editorType: "design",
+      designJson,
+      plainText: "Invoice {{invoiceNumber}} total {{totalAmountLabel}}",
+    },
+    {
+      templateScope: "movira_control",
+      customerName: "Asha Patel",
+      locationName: "Sky Park",
+      invoiceNumber: "SAAS-10",
+      totalAmountLabel: "$371.00",
+      lineItemsHtml: "<div>Bookings — $49.00</div>",
+      pricingRowsHtml: "<tr><td>Total</td><td>$371.00</td></tr>",
+      supportEmail: "support@movira360.com",
+      supportPhone: "+1 555 0100",
+      supportUrl: "https://help.movira360.com",
+    }
+  );
+
+  assert.match(rendered.body, /YOUR LOCATION/);
+  assert.match(rendered.body, /support@movira360\.com/);
+  assert.match(rendered.body, /<td>Total<\/td><td>\$371\.00<\/td>/);
+  assert.doesNotMatch(rendered.body, /YOUR VENUE|Secure venue communication/);
+  assert.equal((rendered.body.match(/Bookings — \$49\.00/g) || []).length, 1);
+});

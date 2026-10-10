@@ -31,8 +31,8 @@ function normalizePayload(payload = {}) {
     payload.name ||
     "Customer";
   const venueName =
-    payload.venueName ||
     payload.locationName ||
+    payload.venueName ||
     business.name ||
     "Movira";
 
@@ -45,9 +45,19 @@ function normalizePayload(payload = {}) {
       String(guestName).trim().split(/\s+/)[0] ||
       "Customer",
     venueName,
+    locationName: payload.locationName || venueName,
     locationAddress: payload.locationAddress || business.address || "",
     locationPhone: payload.locationPhone || business.phone || "",
     locationEmail: payload.locationEmail || business.email || "",
+    supportEmail: payload.supportEmail || payload.locationEmail || business.email || "",
+    supportPhone: payload.supportPhone || payload.locationPhone || business.phone || "",
+    supportUrl: payload.supportUrl || "",
+    emailBrandName: payload.emailBrandName || "Movira360",
+    emailBrandTagline:
+      payload.emailBrandTagline ||
+      (payload.templateScope === "movira_control"
+        ? "Secure Movira Control communication"
+        : "Secure location communication"),
     bookingNumber: payload.bookingNumber || booking.number || "",
     bookingName: payload.bookingName || booking.name || "",
     bookingDate: payload.bookingDate || booking.date || "",
@@ -64,7 +74,7 @@ function normalizePayload(payload = {}) {
     moviraLogoUrl:
       payload.moviraLogoUrl ||
       process.env.MOVIRA360_EMAIL_LOGO_URL ||
-      "https://app.movira360.com/branding/movira360-mark.png",
+      "https://app.movira360.com/branding/movira360-logo.png",
     movira360Url:
       payload.movira360Url ||
       process.env.MOVIRA360_PUBLIC_URL ||

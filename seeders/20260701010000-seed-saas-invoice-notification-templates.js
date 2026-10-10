@@ -12,11 +12,11 @@ const templates = [
     name: "SaaS onboarding started",
     family: "saas",
     category: "saas-onboarding",
-    description: "Welcome a new park owner and explain the onboarding path.",
-    subject: "Welcome to Movira — {{venueName}} onboarding has started",
+    description: "Welcome a new location owner and explain the onboarding path.",
+    subject: "Welcome to Movira — {{locationName}} onboarding has started",
     heading: "Your Movira workspace is ready",
     paragraph:
-      "Hi {{guestName}},<br/>We have started onboarding <strong>{{venueName}}</strong>. Current phase: <strong>{{onboardingPhase}}</strong>.<br/>{{ownerAccessHtml}}We will complete owner access, module access, billing, payment setup, and go-live approval before the park is released.",
+      "Hi {{guestName}},<br/>Onboarding has started for <strong>{{locationName}}</strong>. The complete setup and owner access details are below.",
   },
   {
     slug: "saasInvoiceIssued",
@@ -24,10 +24,10 @@ const templates = [
     family: "saas",
     category: "saas-billing",
     description: "Send SaaS invoice summary after billing is configured or refreshed.",
-    subject: "Invoice {{invoiceNumber}} for {{venueName}}",
+    subject: "Invoice {{invoiceNumber}} for {{locationName}}",
     heading: "Your Movira invoice is ready",
     paragraph:
-      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong> is ready.<br/><br/>Billing cycle: {{billingCycle}}<br/>Period: {{periodStart}} to {{periodEnd}}<br/>Due date: {{dueDate}}<br/>Total: <strong>{{totalAmount}}</strong><br/><br/>{{lineItemsHtml}}",
+      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong> is ready. Review the itemised total below.",
   },
   {
     slug: "saasInvoicePaymentLink",
@@ -38,7 +38,7 @@ const templates = [
     subject: "Payment link for invoice {{invoiceNumber}}",
     heading: "Complete your Movira payment",
     paragraph:
-      "Hi {{guestName}},<br/>Use the secure payment link below to pay invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong>.<br/><br/>Amount due: <strong>{{amountDue}}</strong><br/>Due date: {{dueDate}}<br/><br/><a href=\"{{paymentLink}}\">Pay invoice now</a>",
+      "Hi {{guestName}},<br/>Use the secure button below to pay invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong>.",
   },
   {
     slug: "saasInvoicePaid",
@@ -49,7 +49,7 @@ const templates = [
     subject: "Payment received for invoice {{invoiceNumber}}",
     heading: "Payment received",
     paragraph:
-      "Hi {{guestName}},<br/>Payment has been received for invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong>.<br/><br/>Paid amount: <strong>{{paidAmountLabel}}</strong><br/>Paid on: {{paidAt}}<br/>Status: {{status}}",
+      "Hi {{guestName}},<br/>Payment has been received for invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong>.",
   },
   {
     slug: "saasInvoiceReminder",
@@ -57,10 +57,10 @@ const templates = [
     family: "saas",
     category: "saas-billing",
     description: "Remind a customer owner about a due or overdue SaaS invoice.",
-    subject: "Reminder: invoice {{invoiceNumber}} is due for {{venueName}}",
+    subject: "Reminder: invoice {{invoiceNumber}} is due for {{locationName}}",
     heading: "Invoice reminder",
     paragraph:
-      "Hi {{guestName}},<br/>This is a reminder for invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong>.<br/><br/>Balance due: <strong>{{balanceDueLabel}}</strong><br/>Due date: {{dueDate}}<br/>Reminder stage: {{reminderStage}}<br/><br/>If you already paid, no further action is needed.",
+      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong> still has an outstanding balance. If you already paid, no further action is needed.",
   },
 ];
 

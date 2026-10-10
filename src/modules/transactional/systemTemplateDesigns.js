@@ -233,7 +233,7 @@ function buildBookingMain(profile, row) {
               ? '<div class="txn-label" style="margin-bottom:8px;">Order items</div>{{lineItemsHtml}}<div style="height:14px;line-height:14px;">&nbsp;</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">{{pricingRowsHtml}}</table>{{chargedSummaryHtml}}'
               : showAgreement
                 ? '<div class="txn-label">Agreement</div><div class="txn-value">{{bookingName}}</div><div class="txn-muted" style="margin-top:8px;">Keep this email for your booking records.</div>'
-                : '<div class="txn-label">Activity</div><div class="txn-value">{{bookingName}}</div><div class="txn-muted" style="margin-top:8px;">Venue: {{venueName}}</div>'
+                : '<div class="txn-label">Activity</div><div class="txn-value">{{bookingName}}</div><div class="txn-muted" style="margin-top:8px;">Location: {{locationName}}</div>'
           }
         </td>
       </tr>
@@ -453,7 +453,7 @@ function buildSaasMain(profile, row) {
   const title = onboarding
     ? "Workspace access"
     : parkLifecycle
-      ? "Park launch status"
+      ? "Location launch status"
       : paid
         ? "Payment receipt"
         : paymentLink
@@ -462,7 +462,7 @@ function buildSaasMain(profile, row) {
   const amountValue = paid ? "{{paidAmountLabel}}" : refunded ? "{{paidAmountLabel}}" : reminder ? "{{balanceDueLabel}}" : "{{totalAmountLabel}}";
   const rows = onboarding || parkLifecycle
     ? [
-        saasRow("Park", "{{venueName}}"),
+        saasRow("Location", "{{locationName}}"),
         saasRow("Organization", "{{organizationName}}"),
         saasRow("Current phase", "{{onboardingPhase}}"),
         saasRow("Modules", "{{modules}}"),
@@ -497,8 +497,8 @@ function buildSaasMain(profile, row) {
         <td style="padding:15px 16px;background:${BRAND.canvas};">
           ${
             onboarding || parkLifecycle
-              ? '<div class="txn-muted">{{lifecycleMessage}}</div><div class="txn-muted">Phase: {{onboardingPhase}}</div><div style="height:10px;line-height:10px;">&nbsp;</div>{{ownerAccessHtml}}'
-              : '<div class="txn-label" style="margin-bottom:8px;">Line items</div>{{lineItemsHtml}}<div style="height:10px;line-height:10px;">&nbsp;</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td class="txn-muted">Base</td><td align="right" class="txn-value">{{baseAmount}}</td></tr><tr><td class="txn-muted">Modules</td><td align="right" class="txn-value">{{moduleAmount}}</td></tr><tr><td class="txn-muted">Discount</td><td align="right" class="txn-value">{{discountAmount}}</td></tr><tr><td class="txn-muted">Tax</td><td align="right" class="txn-value">{{taxAmount}}</td></tr></table>'
+              ? '<div class="txn-muted">{{lifecycleMessage}}</div><div style="height:10px;line-height:10px;">&nbsp;</div>{{ownerAccessHtml}}'
+              : '<div class="txn-label" style="margin-bottom:8px;">Line items</div>{{lineItemsHtml}}<div style="height:12px;line-height:12px;">&nbsp;</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">{{pricingRowsHtml}}</table>'
           }
           ${
             paymentLink
@@ -576,7 +576,7 @@ function headerReferenceFor(row = {}) {
   if (row.family === "customer_experience") return "{{venueName}}";
   if (row.family === "saas") {
     if (row.key === "saasOnboardingStarted") return "ONBOARDING";
-    if (["saasParkGoLive", "saasParkGoLiveBlocked"].includes(row.key)) return "PARK STATUS";
+    if (["saasParkGoLive", "saasParkGoLiveBlocked"].includes(row.key)) return "LOCATION STATUS";
     return "#{{invoiceNumber}}";
   }
   if (row.family === "membership") return "{{membershipName}}";
@@ -596,7 +596,7 @@ function factsFor(row = {}) {
   if (row.family === "saas") {
     if (["saasOnboardingStarted", "saasParkGoLive", "saasParkGoLiveBlocked"].includes(row.key)) {
       return [
-        ["PARK", "{{venueName}}"],
+        ["LOCATION", "{{locationName}}"],
         ["PHASE", "{{onboardingPhase}}"],
         ["STATUS", saasStatusFor(row)],
       ];
@@ -691,20 +691,20 @@ function buildTransactionalSystemDesign(row = {}) {
           ),
         ]),
         column("sys_header_brand", "52%", [
-          text("sys_movira_brand", `MOVIRA<span style="color:${BRAND.cyan};">360</span>`, {
+          text("sys_movira_brand", "{{emailBrandName}}", {
             fontSize: 18,
             letterSpacing: ".015em",
             fontWeight: 750,
             color: BRAND.navy,
             padding: { top: 3, right: 10, bottom: 0, left: 0 },
           }),
-          text("sys_brand", "{{venueName}}", {
+          text("sys_brand", "{{locationName}}", {
             fontSize: 12,
             fontWeight: 650,
             color: BRAND.text,
             padding: { top: 3, right: 10, bottom: 0, left: 0 },
           }),
-          text("sys_secure_note", "Secure venue communication", {
+          text("sys_secure_note", "{{emailBrandTagline}}", {
             fontSize: 9,
             letterSpacing: ".06em",
             fontWeight: 650,
@@ -769,14 +769,14 @@ function buildTransactionalSystemDesign(row = {}) {
           }),
         ]),
         column("sys_footer_venue", "49%", [
-          text("sys_footer_venue_label", "YOUR VENUE", {
+          text("sys_footer_venue_label", "YOUR LOCATION", {
             fontSize: 9,
             letterSpacing: ".11em",
             fontWeight: 700,
             color: BRAND.primary,
             padding: { top: 0, right: 12, bottom: 4, left: 0 },
           }),
-          footer("sys_footer_venue_details", `<strong style="color:${BRAND.text};font-weight:650;">{{venueName}}</strong><br>{{locationAddress}}`, {
+          footer("sys_footer_venue_details", `<strong style="color:${BRAND.text};font-weight:650;">{{locationName}}</strong><br>{{locationAddress}}`, {
             fontSize: 11,
             color: BRAND.muted,
             lineHeight: "1.55",
@@ -792,7 +792,7 @@ function buildTransactionalSystemDesign(row = {}) {
             color: BRAND.primary,
             padding: { top: 0, right: 0, bottom: 4, left: 0 },
           }),
-          footer("sys_footer_support_details", `<a href="mailto:{{locationEmail}}" style="color:${BRAND.text};text-decoration:none;font-weight:650;">{{locationEmail}}</a><br>{{locationPhone}}`, {
+          footer("sys_footer_support_details", `<a href="mailto:{{supportEmail}}" style="color:${BRAND.text};text-decoration:none;font-weight:650;">{{supportEmail}}</a><br>{{supportPhone}}<br><a href="{{supportUrl}}" style="color:${BRAND.primary};text-decoration:none;font-weight:650;">Help center</a>`, {
             align: "right",
             fontSize: 11,
             color: BRAND.muted,
@@ -803,7 +803,7 @@ function buildTransactionalSystemDesign(row = {}) {
       ]),
       section("sys_powered", "1", { backgroundColor: BRAND.navy, padding: { top: 11, right: 22, bottom: 12, left: 22 } }, [
         column("sys_powered_col", "100%", [
-          footer("sys_powered_text", `Powered by <a href="{{movira360Url}}" style="color:${BRAND.cyan};text-decoration:none;font-weight:750;">Movira360</a><span style="color:${BRAND.onDarkMuted};"> &nbsp;•&nbsp; Smart venue operations</span>`, {
+          footer("sys_powered_text", `Powered by <a href="{{movira360Url}}" style="color:${BRAND.cyan};text-decoration:none;font-weight:750;">Movira360</a><span style="color:${BRAND.onDarkMuted};"> &nbsp;•&nbsp; Smart location operations</span>`, {
             align: "center",
             fontSize: 10,
             color: BRAND.white,
@@ -848,7 +848,7 @@ function buildTransactionalPlainText(row = {}) {
     return [
       defaults.heading || row.name || presentationFor(row).title, "",
       String(defaults.paragraph || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, ""),
-      "", "Venue: {{venueName}}", ...details, "", "Powered by Movira360",
+      "", "Location: {{locationName}}", ...details, "", "Powered by Movira360",
     ].join("\n");
   }
   if (row.family === "saas") {
@@ -859,7 +859,7 @@ function buildTransactionalPlainText(row = {}) {
         .replace(/<br\s*\/?>/gi, "\n")
         .replace(/<[^>]+>/g, ""),
       "",
-      "Park: {{venueName}}",
+      "Location: {{locationName}}",
       "Organization: {{organizationName}}",
       "Invoice: {{invoiceNumber}}",
       "Status: {{status}}",
@@ -878,7 +878,7 @@ function buildTransactionalPlainText(row = {}) {
     "",
     "Booking: {{bookingNumber}}",
     "Date: {{bookingDate}}",
-    "Venue: {{venueName}}",
+    "Location: {{locationName}}",
     "Total: {{totalAmount}}",
     "",
     "Powered by Movira360",

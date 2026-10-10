@@ -16,7 +16,7 @@ const templates = [
     subject: "Invoice {{invoiceNumber}} has been voided",
     heading: "Invoice voided",
     paragraph:
-      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong> has been voided and is no longer payable.<br/><br/>Status: {{status}}",
+      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong> has been voided and is no longer payable.",
   },
   {
     slug: "saasInvoiceRefunded",
@@ -27,7 +27,7 @@ const templates = [
     subject: "Refund processed for invoice {{invoiceNumber}}",
     heading: "Refund processed",
     paragraph:
-      "Hi {{guestName}},<br/>A refund has been processed for invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong>.<br/><br/>Current paid balance: <strong>{{paidAmountLabel}}</strong><br/>Status: {{status}}",
+      "Hi {{guestName}},<br/>A refund has been processed for invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong>.",
   },
   {
     slug: "saasBillingPastDue",
@@ -38,18 +38,18 @@ const templates = [
     subject: "Action needed: invoice {{invoiceNumber}} is past due",
     heading: "Billing is past due",
     paragraph:
-      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{venueName}}</strong> is past due.<br/><br/>Balance due: <strong>{{balanceDueLabel}}</strong><br/>Due date: {{dueDate}}<br/><br/>{{lifecycleMessage}}",
+      "Hi {{guestName}},<br/>Invoice <strong>{{invoiceNumber}}</strong> for <strong>{{locationName}}</strong> is past due. Please review the balance and due date below.",
   },
   {
     slug: "saasBillingSuspended",
     name: "SaaS billing suspended",
     family: "saas",
     category: "saas-billing",
-    description: "Notify the customer owner when a park is paused for non-payment.",
-    subject: "{{venueName}} is paused for billing",
+    description: "Notify the customer owner when a location is paused for non-payment.",
+    subject: "{{locationName}} is paused for billing",
     heading: "Billing hold applied",
     paragraph:
-      "Hi {{guestName}},<br/><strong>{{venueName}}</strong> has been paused because invoice <strong>{{invoiceNumber}}</strong> is overdue.<br/><br/>Balance due: <strong>{{balanceDueLabel}}</strong><br/>{{lifecycleMessage}}",
+      "Hi {{guestName}},<br/><strong>{{locationName}}</strong> has been paused because invoice <strong>{{invoiceNumber}}</strong> is overdue.",
   },
   {
     slug: "saasBillingRecovered",
@@ -57,32 +57,32 @@ const templates = [
     family: "saas",
     category: "saas-billing",
     description: "Confirm that the SaaS billing account is back in good standing.",
-    subject: "{{venueName}} billing is back in good standing",
+    subject: "{{locationName}} billing is back in good standing",
     heading: "Billing recovered",
     paragraph:
-      "Hi {{guestName}},<br/>Billing for <strong>{{venueName}}</strong> is back in good standing.<br/><br/>{{lifecycleMessage}}",
+      "Hi {{guestName}},<br/>Billing for <strong>{{locationName}}</strong> is back in good standing.",
   },
   {
     slug: "saasParkGoLive",
-    name: "SaaS park go-live approved",
+    name: "SaaS location go-live approved",
     family: "saas",
     category: "saas-onboarding",
-    description: "Tell the customer owner that their park is live.",
-    subject: "{{venueName}} is live on Movira",
-    heading: "Your park is live",
+    description: "Tell the customer owner that their location is live.",
+    subject: "{{locationName}} is live on Movira",
+    heading: "Your location is live",
     paragraph:
-      "Hi {{guestName}},<br/><strong>{{venueName}}</strong> has been approved for live operations.<br/><br/>Current phase: {{onboardingPhase}}<br/>{{lifecycleMessage}}",
+      "Hi {{guestName}},<br/><strong>{{locationName}}</strong> has been approved for live operations.",
   },
   {
     slug: "saasParkGoLiveBlocked",
-    name: "SaaS park go-live blocked",
+    name: "SaaS location go-live blocked",
     family: "saas",
     category: "saas-onboarding",
-    description: "Tell the customer owner that go-live needs more checks.",
-    subject: "{{venueName}} needs checks before go-live",
+    description: "Tell the customer owner that location go-live needs more checks.",
+    subject: "{{locationName}} needs checks before go-live",
     heading: "Go-live needs attention",
     paragraph:
-      "Hi {{guestName}},<br/><strong>{{venueName}}</strong> is not live yet because required checks are incomplete.<br/><br/>Current phase: {{onboardingPhase}}<br/>{{lifecycleMessage}}",
+      "Hi {{guestName}},<br/><strong>{{locationName}}</strong> is not live yet because required checks are incomplete. Review the status below.",
   },
 ];
 
