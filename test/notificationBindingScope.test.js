@@ -33,6 +33,19 @@ test("park user cannot manage another park or a global binding", () => {
   );
 });
 
+test("park user cannot see or manage Movira Control event bindings", () => {
+  assert.throws(
+    () =>
+      assertBindingScope(
+        { id: 9, locationId: 4, eventType: "saas.invoice.issued" },
+        { locationId: 4, isSuperAdmin: false }
+      ),
+    (error) =>
+      error.statusCode === 403 &&
+      error.code === "movira_control_binding_access_denied"
+  );
+});
+
 test("super admin can manage park and global bindings", () => {
   assert.doesNotThrow(() =>
     assertBindingScope(

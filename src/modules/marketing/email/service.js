@@ -10,7 +10,7 @@ const { Op } = require("sequelize");
 const config = require("../../../config");
 const { getModels } = require("../../../db/models");
 const { createDefaultDesign } = require("./builder/defaultDesign");
-const { renderDesign, interpolate } = require("./builder/renderer");
+const { renderDesign, interpolate, applyBrandThemeToHtml } = require("./builder/renderer");
 const { renderRawTemplate } = require("./rawTemplateRenderer");
 const { getBuilderCatalog } = require("./builder/catalog");
 const { getMergeTagCatalog } = require("./builder/mergeTags");
@@ -25,7 +25,9 @@ const queueJobs = require("../../queueJobs/service");
 const deliveryWindow = require("./deliveryWindow");
 const dripService = require("./dripService");
 const { requireMarketingSender } = require("../../messaging-core/providers/domainSenderResolver");
+const emailDeliveryPolicy = require("../../../shared/emailDeliveryPolicy");
 const { assertMarketingWorkerOnline } = require("./sqsWorkerVerificationService");
+const platformBranding = require("../../../shared/platformBranding");
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -931,29 +933,32 @@ function renderDraftTemplate({ name = "Draft email", designJson, htmlBody, plain
   };
 }
 
-async function sendTestTemplate(id, { to, subject, data, from } = {}) {
+async function sendTestTemplate(id, { to, subject, data, from, locationId } = {}) {
   validate([
     !EMAIL_RE.test(String(to || "").trim()) && { field: "to", message: "Valid test recipient email is required." },
   ]);
   const template = await getTemplate(id);
+  const effectiveLocationId = template.locationId || requireLocation(locationId);
+  const branding = await platformBranding.getEmailBranding(effectiveLocationId, { fresh: true });
+  const renderData = { ...(data || {}), ...branding };
   const templateValidation = validateTemplateBeforeSend(template, {
     subject: subject || `[Test] ${template.name}`,
-    recipients: [{ email: String(to).trim(), data: data || {} }],
-    data: data || {},
+    recipients: [{ email: String(to).trim(), data: renderData }],
+    data: renderData,
   });
   validate(templateValidation.errors.map((issue) => ({ field: issue.key, message: issue.message })));
   const htmlBody = template.editorType === "design"
-    ? renderDesign(template.designJson || createDefaultDesign(), { title: template.name, data: data || {} }).html
-    : renderRawTemplate({ ...template, data: data || {} }).htmlBody;
+    ? renderDesign(template.designJson || createDefaultDesign(), { title: template.name, data: renderData }).html
+    : applyBrandThemeToHtml(renderRawTemplate({ ...template, data: renderData }).htmlBody, renderData);
   const send = template.useCase === "transactional"
     ? emailProvider.sendTransactionalEmail
     : emailProvider.sendMarketingEmail;
   const result = await send({
-    locationId: template.locationId,
+    locationId: effectiveLocationId,
     to: String(to).trim(),
-    subject: interpolate(subject || `[Test] ${template.name}`, data || {}),
+    subject: interpolate(subject || `[Test] ${template.name}`, renderData),
     html: htmlBody,
-    text: template.editorType === "design" ? undefined : renderRawTemplate({ ...template, data: data || {} }).plainText,
+    text: template.editorType === "design" ? undefined : renderRawTemplate({ ...template, data: renderData }).plainText,
     from,
     trackingTags: [
       { name: "purpose", value: "test_send" },
@@ -980,10 +985,13 @@ async function sendTestDraftTemplate({ to, subject, name = "Draft email", useCas
     nextEditorType === "plain" && !String(plainText || "").trim() && { field: "plainText", message: "Plain text body is required." },
   ]);
   if (designJson) validateDesign(designJson);
-  const rawContent = renderRawTemplate({ editorType: nextEditorType, htmlBody, plainText, data: data || {} });
+  const effectiveLocationId = requireLocation(locationId);
+  const branding = await platformBranding.getEmailBranding(effectiveLocationId, { fresh: true });
+  const renderData = { ...(data || {}), ...branding };
+  const rawContent = renderRawTemplate({ editorType: nextEditorType, htmlBody, plainText, data: renderData });
   const renderedHtml = nextEditorType === "design"
-    ? renderDesign(designJson || createDefaultDesign(), { title: name, data: data || {} }).html
-    : rawContent.htmlBody;
+    ? renderDesign(designJson || createDefaultDesign(), { title: name, data: renderData }).html
+    : applyBrandThemeToHtml(rawContent.htmlBody, renderData);
   const templateValidation = validateTemplateBeforeSend({
     name,
     editorType: nextEditorType,
@@ -993,17 +1001,17 @@ async function sendTestDraftTemplate({ to, subject, name = "Draft email", useCas
     plainText: nextEditorType === "design" ? null : plainText,
   }, {
     subject,
-    recipients: [{ email: String(to).trim(), data: data || {} }],
-    data: data || {},
+    recipients: [{ email: String(to).trim(), data: renderData }],
+    data: renderData,
   });
   validate(templateValidation.errors.map((issue) => ({ field: issue.key, message: issue.message })));
   const send = useCase === "transactional"
     ? emailProvider.sendTransactionalEmail
     : emailProvider.sendMarketingEmail;
   const result = await send({
-    locationId: locationId || null,
+    locationId: effectiveLocationId,
     to: String(to).trim(),
-    subject: interpolate(subject, data || {}),
+    subject: interpolate(subject, renderData),
     html: renderedHtml,
     text: nextEditorType === "design" ? undefined : rawContent.plainText,
     from,
@@ -1748,6 +1756,7 @@ async function queueCampaignMessages(campaignId, body = {}) {
   const { CrmMarketingCampaign, CrmMarketingTemplate } = getModels();
   const campaign = await CrmMarketingCampaign.findByPk(campaignId);
   if (!campaign) throw notFound("Campaign");
+  await emailDeliveryPolicy.assertEnabled("marketing", { locationId: campaign.locationId }, { fresh: true });
   assertMarketingQueueConfigured(campaignQueueType(campaign));
   await assertMarketingWorkerOnline({ audience: hasAudienceSelection(body) || campaign.campaignType === "workflow_campaign" });
   validate([

@@ -98,6 +98,42 @@ test("rendered onboarding email has full frame, logo colors and no unresolved co
   assert.doesNotMatch(rendered.body, /\{\{\s*(guestName|venueName)\s*\}\}/);
 });
 
+test("transactional system emails inherit white-label colours without editing the template", () => {
+  const designJson = buildTransactionalSystemDesign({
+    key: "saasOnboardingStarted",
+    family: "saas",
+    name: "SaaS onboarding started",
+  });
+  const rendered = renderTemplate(
+    { name: "Onboarding", subject: "Welcome", editorType: "design", designJson, plainText: "Welcome" },
+    {
+      locationName: "Sky Park",
+      emailBrandPrimaryColor: "#0F766E",
+      emailBrandSecondaryColor: "#134E4A",
+    }
+  );
+
+  assert.match(rendered.body, /#0F766E/);
+  assert.match(rendered.body, /#134E4A/);
+  assert.doesNotMatch(rendered.body, /#7220E6/i);
+  assert.doesNotMatch(rendered.body, /#480D9A/i);
+});
+
+test("customer-facing system designs use location terminology in visible labels", () => {
+  for (const [key, family] of [
+    ["bookingConfirmation", "booking"],
+    ["customerExperienceRecoveryReply", "customer_experience"],
+  ]) {
+    const serialized = JSON.stringify(
+      buildTransactionalSystemDesign({ key, family, name: key })
+    );
+    assert.match(serialized, /YOUR LOCATION/);
+    assert.match(serialized, /LOCATION/);
+    assert.doesNotMatch(serialized, /YOUR VENUE|Secure venue communication|A message from your venue/);
+    assert.doesNotMatch(serialized, /\{\{venueName\}\}/);
+  }
+});
+
 test("Movira Control invoice uses platform support once and renders an explicit total", () => {
   const designJson = buildTransactionalSystemDesign({
     key: "saasInvoiceIssued",

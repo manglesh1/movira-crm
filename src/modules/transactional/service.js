@@ -3,6 +3,8 @@ const { validateCreateMessage } = require("./validation");
 const { enqueueTransactionalMessage } = require("../messaging-core/aws/sqsClient");
 const { STATUS } = require("./constants");
 const suppressionService = require("../marketing/email/suppressionService");
+const emailDeliveryPolicy = require("../../shared/emailDeliveryPolicy");
+const { isMoviraControlMessage } = require("../../shared/communicationScope");
 
 function shouldProcessInline(enqueue) {
   if (!enqueue?.skipped || enqueue.reason !== "missing_queue_url") return false;
@@ -72,6 +74,10 @@ async function enqueueMessage(body) {
     const err = new Error(validation.errors.join("; "));
     err.statusCode = 400;
     throw err;
+  }
+
+  if (!isMoviraControlMessage(validation.value)) {
+    await emailDeliveryPolicy.assertEnabled("transactional", validation.value, { fresh: true });
   }
 
   const existing = await repository.findByIdempotencyKey(validation.value.idempotencyKey);

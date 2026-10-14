@@ -2,6 +2,11 @@ const repository = require("./repository");
 const { renderTemplate } = require("./templateRenderer");
 const transactionalService = require("./service");
 const auditService = require("../audit/service");
+const platformBranding = require("../../shared/platformBranding");
+const {
+  MOVIRA_CONTROL_SCOPE,
+  isMoviraControlTemplate,
+} = require("../../shared/communicationScope");
 
 async function safeAudit(input) {
   try {
@@ -33,6 +38,7 @@ function serializeTemplate(row, { bindings } = {}) {
     name: row.name,
     category: row.category,
     family: row.family || null,
+    templateScope: isMoviraControlTemplate(row) ? MOVIRA_CONTROL_SCOPE : "location",
     description: row.description || null,
     templateType: "email",
     subject: row.subject,
@@ -53,6 +59,13 @@ function serializeTemplate(row, { bindings } = {}) {
   };
 }
 
+function assertTemplateAccess(row, scope = {}) {
+  if (isMoviraControlTemplate(row) && !scope.isSuperAdmin) {
+    throw httpError(403, "Movira Control templates are available only to Super Admin.");
+  }
+  return row;
+}
+
 function serializeBinding(b) {
   return {
     id: b.id,
@@ -64,11 +77,14 @@ function serializeBinding(b) {
   };
 }
 
-async function listTemplates(query = {}) {
-  const rows = await repository.listTemplates({
+async function listTemplates(query = {}, scope = {}) {
+  const allRows = await repository.listTemplates({
     locationId: query.locationId ? Number(query.locationId) : null,
     channel: query.channel || null,
   });
+  const rows = scope.isSuperAdmin
+    ? allRows
+    : allRows.filter((row) => !isMoviraControlTemplate(row));
 
   if (!query.includeBindings) return rows.map((r) => serializeTemplate(r));
 
@@ -80,11 +96,17 @@ async function listTemplates(query = {}) {
   return out;
 }
 
-async function getTemplate(id, { includeBindings = true } = {}) {
+async function getTemplate(id, { includeBindings = true } = {}, scope = {}) {
   const row = await repository.findTemplateById(id);
   if (!row) throw httpError(404, "Template not found");
+  assertTemplateAccess(row, scope);
   const bindings = includeBindings ? await repository.findBindingsForTemplate(row.key) : null;
-  return serializeTemplate(row, bindings ? { bindings } : {});
+  const serialized = serializeTemplate(row, bindings ? { bindings } : {});
+  if (!isMoviraControlTemplate(row)) return serialized;
+  return {
+    ...serialized,
+    effectiveBranding: await platformBranding.getPlatformBranding(),
+  };
 }
 
 function validateInput(body, { partial = false } = {}) {
@@ -162,9 +184,10 @@ function validateInput(body, { partial = false } = {}) {
   };
 }
 
-async function createTemplate(body, user) {
+async function createTemplate(body, user, scope = {}) {
   const v = validateInput(body);
   if (!v.ok) throw httpError(400, v.errors.join("; "));
+  assertTemplateAccess(v.value, scope);
 
   const existing = await repository.findTemplateByKey({
     locationId: v.value.locationId,
@@ -196,9 +219,10 @@ async function createTemplate(body, user) {
   return serializeTemplate(created);
 }
 
-async function updateTemplate(id, body, user) {
+async function updateTemplate(id, body, user, scope = {}) {
   const row = await repository.findTemplateById(id);
   if (!row) throw httpError(404, "Template not found");
+  assertTemplateAccess(row, scope);
 
   if (row.isSystem) {
     // System templates are read-only. Only isActive toggle is permitted
@@ -233,6 +257,7 @@ async function updateTemplate(id, body, user) {
   const merged = { ...row.toJSON(), ...body };
   const v = validateInput(merged, { partial: true });
   if (!v.ok) throw httpError(400, v.errors.join("; "));
+  assertTemplateAccess(v.value, scope);
 
   const patch = {};
   for (const key of [
@@ -272,9 +297,10 @@ async function updateTemplate(id, body, user) {
   return serializeTemplate(updated);
 }
 
-async function deleteTemplate(id) {
+async function deleteTemplate(id, scope = {}) {
   const row = await repository.findTemplateById(id);
   if (!row) throw httpError(404, "Template not found");
+  assertTemplateAccess(row, scope);
   if (row.isSystem) {
     throw httpError(400, "System templates cannot be deleted (set isActive=false instead)");
   }
@@ -297,9 +323,10 @@ async function deleteTemplate(id) {
   return { id };
 }
 
-async function cloneTemplate(id, body = {}, user) {
+async function cloneTemplate(id, body = {}, user, scope = {}) {
   const row = await repository.findTemplateById(id);
   if (!row) throw httpError(404, "Template not found");
+  assertTemplateAccess(row, scope);
 
   const newKey = body.key || `${row.key}-copy-${Date.now()}`;
   const newName = body.name || `${row.name} (copy)`;
@@ -345,10 +372,11 @@ async function cloneTemplate(id, body = {}, user) {
   return serializeTemplate(clone);
 }
 
-async function testSendTemplate(id, { to, data, subject, from, locationId } = {}) {
+async function testSendTemplate(id, { to, data, subject, from, locationId } = {}, scope = {}) {
   if (!to) throw httpError(400, "'to' is required");
   const row = await repository.findTemplateById(id);
   if (!row) throw httpError(404, "Template not found");
+  assertTemplateAccess(row, scope);
 
   const samplePayload = data && typeof data === "object" ? data : {};
   const effectiveLocationId =
@@ -359,6 +387,7 @@ async function testSendTemplate(id, { to, data, subject, from, locationId } = {}
 
   const payload = {
     ...samplePayload,
+    ...(isMoviraControlTemplate(row) ? { templateScope: MOVIRA_CONTROL_SCOPE } : {}),
     __test: {
       templateId: row.id,
       requestedSubject: subject || null,
@@ -421,4 +450,5 @@ module.exports = {
   cloneTemplate,
   testSendTemplate,
   renderDraft,
+  _internal: { assertTemplateAccess },
 };

@@ -47,7 +47,7 @@ const FAMILY_PROFILES = {
 const TEMPLATE_PRESENTATION = Object.freeze({
   customerExperienceFeedbackRequest: { status: "Your feedback", title: "Tell us about your visit", tone: "primary" },
   customerExperienceFeedbackReceived: { status: "New response", title: "Guest feedback", tone: "primary" },
-  customerExperienceRecoveryReply: { status: "Follow-up", title: "A message from your venue", tone: "primary" },
+  customerExperienceRecoveryReply: { status: "Follow-up", title: "A message from your location", tone: "primary" },
   customerExperienceRewardIssued: { status: "Thank you", title: "Your reward", tone: "success" },
   bookingConfirmation: { status: "Confirmed", title: "Booking details", tone: "success" },
   "canceled-tentative-booking": { status: "Cancelled", title: "Cancelled booking", tone: "danger" },
@@ -253,7 +253,7 @@ function buildPaymentMain(profile, key) {
         <td style="padding:13px 16px;">
           <div class="txn-label">${isLink ? "Amount due" : "Amount paid"}</div>
           <div class="txn-total">${isLink ? "{{amountDue}}" : "{{amountPaid}}"}</div>
-          <div class="txn-muted" style="margin-top:6px;">Booking {{bookingNumber}} at {{venueName}}</div>
+          <div class="txn-muted" style="margin-top:6px;">Booking {{bookingNumber}} at {{locationName}}</div>
         </td>
       </tr>
       <tr>
@@ -280,7 +280,7 @@ function buildWaiverMain(profile, key) {
         <td style="padding:13px 16px;">
           <div class="txn-label">Guest</div>
           <div class="txn-value">{{guestName}}</div>
-          <div class="txn-muted" style="margin-top:6px;">{{venueName}}</div>
+          <div class="txn-muted" style="margin-top:6px;">{{locationName}}</div>
         </td>
       </tr>
       <tr>
@@ -332,7 +332,7 @@ function buildGuestListMain(profile, row) {
         <td style="padding:13px 16px;">
           <div class="txn-label">Booking</div>
           <div class="txn-value">{{bookingNumber}}</div>
-          <div class="txn-muted" style="margin-top:6px;">{{bookingDate}} · {{venueName}}</div>
+          <div class="txn-muted" style="margin-top:6px;">{{bookingDate}} · {{locationName}}</div>
         </td>
       </tr>
       <tr>
@@ -405,7 +405,7 @@ function buildGenericMain(profile, title, row) {
         <td style="padding:13px 16px;">
           <div class="txn-label">Reference</div>
           <div class="txn-value">{{bookingNumber}}</div>
-          <div class="txn-muted" style="margin-top:8px;">{{venueName}}</div>
+          <div class="txn-muted" style="margin-top:8px;">{{locationName}}</div>
         </td>
       </tr>
     `,
@@ -529,7 +529,7 @@ function buildCustomerExperienceMain(profile, row) {
       <div class="txn-label">Ratings by category</div>{{factorRatingsHtml}}`;
   } else {
     // Reply and reward details already live in their editable introduction.
-    content = '<div class="txn-label">From</div><div class="txn-value">{{venueName}}</div>';
+    content = '<div class="txn-label">From</div><div class="txn-value">{{locationName}}</div>';
   }
   return buildSummaryCard(profile, presentation.title,
     `<tr><td style="padding:16px;">${content}</td></tr>`, presentation);
@@ -573,7 +573,7 @@ function mainContentFor(row, profile, headingText) {
 }
 
 function headerReferenceFor(row = {}) {
-  if (row.family === "customer_experience") return "{{venueName}}";
+  if (row.family === "customer_experience") return "{{locationName}}";
   if (row.family === "saas") {
     if (row.key === "saasOnboardingStarted") return "ONBOARDING";
     if (["saasParkGoLive", "saasParkGoLiveBlocked"].includes(row.key)) return "LOCATION STATUS";
@@ -591,7 +591,7 @@ function headerStatusFor(row = {}) {
 
 function factsFor(row = {}) {
   if (row.family === "customer_experience") {
-    return [["VENUE", "{{venueName}}"], ["GUEST", "{{guestName}}"], ["STATUS", presentationFor(row).status]];
+    return [["LOCATION", "{{locationName}}"], ["GUEST", "{{guestName}}"], ["STATUS", presentationFor(row).status]];
   }
   if (row.family === "saas") {
     if (["saasOnboardingStarted", "saasParkGoLive", "saasParkGoLiveBlocked"].includes(row.key)) {
@@ -638,7 +638,7 @@ function factsFor(row = {}) {
   return [
     ["BOOKING", "{{bookingNumber}}"],
     ["WHEN", "{{bookingDate}}"],
-    ["VENUE", "{{venueName}}"],
+    ["LOCATION", "{{locationName}}"],
   ];
 }
 
@@ -646,7 +646,7 @@ function buildTransactionalSystemDesign(row = {}) {
   const defaults = parseJson(row.defaults);
   const family = row.family || row.category || "system";
   const profile = FAMILY_PROFILES[family] || FAMILY_PROFILES.system;
-  const headingText = defaults.heading || row.name || "Update from {{venueName}}";
+  const headingText = defaults.heading || row.name || "Update from {{locationName}}";
   const paragraph = defaults.paragraph || "Hi {{guestName}},<br/>Here are the details for your visit.";
   const action = actionFor(row);
   const mainHtml = mainContentFor(row, profile, headingText);
@@ -768,15 +768,15 @@ function buildTransactionalSystemDesign(row = {}) {
             padding: { top: 1, right: 10, bottom: 0, left: 0 },
           }),
         ]),
-        column("sys_footer_venue", "49%", [
-          text("sys_footer_venue_label", "YOUR LOCATION", {
+        column("sys_footer_location", "49%", [
+          text("sys_footer_location_label", "YOUR LOCATION", {
             fontSize: 9,
             letterSpacing: ".11em",
             fontWeight: 700,
             color: BRAND.primary,
             padding: { top: 0, right: 12, bottom: 4, left: 0 },
           }),
-          footer("sys_footer_venue_details", `<strong style="color:${BRAND.text};font-weight:650;">{{locationName}}</strong><br>{{locationAddress}}`, {
+          footer("sys_footer_location_details", `<strong style="color:${BRAND.text};font-weight:650;">{{locationName}}</strong><br>{{locationAddress}}`, {
             fontSize: 11,
             color: BRAND.muted,
             lineHeight: "1.55",
@@ -872,7 +872,7 @@ function buildTransactionalPlainText(row = {}) {
     ].join("\n");
   }
   return [
-    defaults.heading || row.name || "Update from {{venueName}}",
+    defaults.heading || row.name || "Update from {{locationName}}",
     "",
     String(defaults.paragraph || "Hi {{guestName}}, here are your details.").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, ""),
     "",

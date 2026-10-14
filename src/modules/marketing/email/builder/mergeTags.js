@@ -119,7 +119,7 @@ const MERGE_TAG_GROUPS = [
     contexts: ["marketing", "transactional"],
     fields: [
       { label: "Name", token: "business.name", type: "text", sampleValue: "Movira" },
-      { label: "Venue Name", token: "venueName", type: "text", sampleValue: "Movira", contexts: ["transactional"] },
+      { label: "Location Name", token: "locationName", type: "text", sampleValue: "Movira", contexts: ["transactional"] },
       { label: "Address", token: "business.address", type: "text", sampleValue: "123 Main Street" },
       { label: "Location Address", token: "locationAddress", type: "text", sampleValue: "123 Main Street", contexts: ["transactional"] },
       { label: "Phone", token: "business.phone", type: "phone", sampleValue: "+1 555 0100" },

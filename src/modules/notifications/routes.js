@@ -40,8 +40,8 @@ router.post("/events", internalAuth, async (req, res, next) => {
 router.get("/events", auth, authorizeLocation({
   action: "crm:notifications:read",
   requireLocation: true,
-}), (_req, res) => {
-  res.json({ success: true, data: service.listEvents() });
+}), (req, res) => {
+  res.json({ success: true, data: service.listEvents(bindingScope(req)) });
 });
 
 router.use(auth, authorizeLocation({

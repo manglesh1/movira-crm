@@ -11,6 +11,23 @@ function badRequest(message, errors = []) {
   return err;
 }
 
+function conflict(message, code = "automation_conflict") {
+  const err = new Error(message);
+  err.statusCode = 409;
+  err.code = code;
+  return err;
+}
+
+function rethrowWorkflowWriteError(err) {
+  if (err?.name === "SequelizeUniqueConstraintError") {
+    throw conflict(
+      "A workflow with this name already exists in this location. Choose a different name.",
+      "duplicate_workflow_name",
+    );
+  }
+  throw err;
+}
+
 function notFound(label) {
   const err = new Error(`${label} not found`);
   err.statusCode = 404;
@@ -27,6 +44,27 @@ function requireLocation(locationId) {
 function cleanString(value, max = 240) {
   const text = String(value || "").trim();
   return text ? text.slice(0, max) : null;
+}
+
+async function assertUniqueWorkflowName(models, { locationId, name, excludeId = null }) {
+  const normalizedName = cleanString(name, 180);
+  if (!normalizedName) return;
+  const sequelize = models.CrmAutomationWorkflow.sequelize;
+  const where = {
+    locationId,
+    [Op.and]: sequelize.where(
+      sequelize.fn("LOWER", sequelize.fn("BTRIM", sequelize.col("name"))),
+      normalizedName.toLowerCase(),
+    ),
+  };
+  if (excludeId) where.id = { [Op.ne]: excludeId };
+  const existing = await models.CrmAutomationWorkflow.findOne({ where, attributes: ["id"] });
+  if (existing) {
+    throw conflict(
+      "A workflow with this name already exists in this location. Choose a different name.",
+      "duplicate_workflow_name",
+    );
+  }
 }
 
 function plain(row) {
@@ -260,18 +298,24 @@ async function createWorkflow(input = {}) {
   const models = getModels();
   const locationId = requireLocation(input.locationId);
   const valid = validateWorkflowPayload(input);
-  const workflow = await models.CrmAutomationWorkflow.create({
-    locationId,
-    name: valid.name,
-    description: cleanString(input.description, 2000),
-    status: cleanString(input.status || "draft", 40) || "draft",
-    triggerKey: valid.triggerKey,
-    triggerLabel: valid.triggerLabel,
-    nodes: valid.nodes,
-    settings: input.settings && typeof input.settings === "object" ? input.settings : {},
-    stats: input.stats && typeof input.stats === "object" ? input.stats : {},
-    publishedAt: input.status === "published" ? new Date() : null,
-  });
+  await assertUniqueWorkflowName(models, { locationId, name: valid.name });
+  let workflow;
+  try {
+    workflow = await models.CrmAutomationWorkflow.create({
+      locationId,
+      name: valid.name,
+      description: cleanString(input.description, 2000),
+      status: cleanString(input.status || "draft", 40) || "draft",
+      triggerKey: valid.triggerKey,
+      triggerLabel: valid.triggerLabel,
+      nodes: valid.nodes,
+      settings: input.settings && typeof input.settings === "object" ? input.settings : {},
+      stats: input.stats && typeof input.stats === "object" ? input.stats : {},
+      publishedAt: input.status === "published" ? new Date() : null,
+    });
+  } catch (err) {
+    rethrowWorkflowWriteError(err);
+  }
   return serializeWorkflow(workflow);
 }
 
@@ -280,6 +324,9 @@ async function updateWorkflow(id, input = {}) {
   const locationId = requireLocation(input.locationId);
   const workflow = await models.CrmAutomationWorkflow.findOne({ where: { id, locationId } });
   if (!workflow) throw notFound("Automation workflow");
+  if (input.name !== undefined) {
+    await assertUniqueWorkflowName(models, { locationId, name: input.name, excludeId: id });
+  }
   const patch = {};
   if (input.name !== undefined) patch.name = cleanString(input.name, 180);
   if (input.description !== undefined) patch.description = cleanString(input.description, 2000);
@@ -295,7 +342,12 @@ async function updateWorkflow(id, input = {}) {
   if (input.settings !== undefined) patch.settings = input.settings && typeof input.settings === "object" ? input.settings : {};
   if (input.stats !== undefined) patch.stats = input.stats && typeof input.stats === "object" ? input.stats : {};
   if (patch.name === null) throw badRequest("Workflow name is required");
-  const updated = await workflow.update(patch);
+  let updated;
+  try {
+    updated = await workflow.update(patch);
+  } catch (err) {
+    rethrowWorkflowWriteError(err);
+  }
   return serializeWorkflow(updated);
 }
 
@@ -304,6 +356,26 @@ async function deleteWorkflow(id, query = {}) {
   const locationId = requireLocation(query.locationId);
   const workflow = await models.CrmAutomationWorkflow.findOne({ where: { id, locationId } });
   if (!workflow) throw notFound("Automation workflow");
+  if (workflow.status === "published") {
+    throw conflict(
+      "This workflow is published and currently in use. Pause it first, then delete it.",
+      "workflow_in_use",
+    );
+  }
+  const [activeEnrollmentJobs, activeRuns] = await Promise.all([
+    models.CrmAutomationEnrollmentJob.count({
+      where: { workflowId: id, locationId, status: { [Op.in]: ["queued", "processing"] } },
+    }),
+    models.CrmAutomationRun.count({
+      where: { workflowId: id, locationId, status: { [Op.in]: ["queued", "running", "waiting", "processing"] } },
+    }),
+  ]);
+  if (activeEnrollmentJobs || activeRuns) {
+    throw conflict(
+      "This workflow still has active enrollments or waiting actions. Remove or finish them before deleting the workflow.",
+      "workflow_in_use",
+    );
+  }
   const data = serializeWorkflow(workflow);
   await workflow.destroy();
   return data;

@@ -5,7 +5,7 @@
 //
 // Placeholder convention from the legacy catalog uses [Venue.Name] etc.
 // We preserve those bracket-style tokens inside the body HTML AND a converted
-// {{venueName}} version on the same line, so this works whether the binding's
+// {{locationName}} version on the same line, so this works whether the binding's
 // variableMap re-maps them or the caller already sends the camelCase names.
 
 const SYSTEM_TEMPLATES = [
@@ -15,10 +15,10 @@ const SYSTEM_TEMPLATES = [
     name: "Order confirmation",
     family: "booking",
     description: "Sent to the guest with confirmation and booking details when an order is made",
-    subject: "Get ready to visit {{venueName}}",
+    subject: "Get ready to visit {{locationName}}",
     heading: "Order confirmed!",
     paragraph:
-      "Hi {{guestName}},<br/>Thanks for choosing {{venueName}}. Please see below for instructions.",
+      "Hi {{guestName}},<br/>Thanks for choosing {{locationName}}. Please see below for instructions.",
   },
   {
     slug: "canceled-tentative-booking",
@@ -26,7 +26,7 @@ const SYSTEM_TEMPLATES = [
     family: "booking",
     description:
       "Email sent to inform guests that their booking has been automatically canceled due to non-payment",
-    subject: "Your tentative booking at {{venueName}} was cancelled",
+    subject: "Your tentative booking at {{locationName}} was cancelled",
     heading: "Booking cancelled",
     paragraph:
       "Hi {{guestName}},<br/>Your tentative booking was cancelled because payment was not completed in time. You're welcome to book again whenever you're ready.",
@@ -37,17 +37,17 @@ const SYSTEM_TEMPLATES = [
     family: "booking",
     description:
       "Sent to the guest with confirmation and booking details when a food and beverage order is made",
-    subject: "Your F&B order at {{venueName}} is confirmed",
+    subject: "Your F&B order at {{locationName}} is confirmed",
     heading: "Your order is in!",
     paragraph:
-      "Hi {{guestName}},<br/>Your food &amp; beverage order is confirmed. We'll have it ready when you arrive at {{venueName}}.",
+      "Hi {{guestName}},<br/>Your food &amp; beverage order is confirmed. We'll have it ready when you arrive at {{locationName}}.",
   },
   {
     slug: "booking-reminder",
     name: "Booking reminder",
     family: "booking",
     description: "Email sent to guests to remind them of useful information before their booking",
-    subject: "Your visit to {{venueName}} is coming up!",
+    subject: "Your visit to {{locationName}} is coming up!",
     heading: "See you soon!",
     paragraph:
       "Hi {{guestName}},<br/>Just a friendly reminder about your upcoming visit. Here's what you need to know.",
@@ -67,7 +67,7 @@ const SYSTEM_TEMPLATES = [
     name: "Booking agreement",
     family: "booking",
     description: "Email sent to guests requesting them to sign a booking agreement",
-    subject: "Please sign your {{venueName}} booking agreement",
+    subject: "Please sign your {{locationName}} booking agreement",
     heading: "Sign your booking agreement",
     paragraph:
       "Hi {{guestName}},<br/>To finalise your booking, please review and sign the agreement linked below.",
@@ -79,7 +79,7 @@ const SYSTEM_TEMPLATES = [
     name: "Guest list update",
     family: "guestList",
     description: "Email sent to booking holder each time a guest RSVPs to their booking",
-    subject: "A guest has RSVPd to your {{venueName}} booking",
+    subject: "A guest has RSVPd to your {{locationName}} booking",
     heading: "Your guest list just got bigger",
     paragraph:
       "Hi {{guestName}},<br/>Someone just RSVPd to your booking. Here's the latest guest list.",
@@ -89,19 +89,19 @@ const SYSTEM_TEMPLATES = [
     name: "Guest list RSVP confirmed",
     family: "guestList",
     description: "Email sent to each to guest who RSVPs to a booking",
-    subject: "You're in! See you at {{venueName}}",
+    subject: "You're in! See you at {{locationName}}",
     heading: "RSVP confirmed",
-    paragraph: "Hi there,<br/>Thanks for confirming. We'll see you at {{venueName}}!",
+    paragraph: "Hi there,<br/>Thanks for confirming. We'll see you at {{locationName}}!",
   },
   {
     slug: "guest-list-rsvp-reminder",
     name: "Guest list RSVP reminder",
     family: "guestList",
     description: "Email sent to each to guest 24 hours before the booking",
-    subject: "Tomorrow at {{venueName}} — see you there!",
+    subject: "Tomorrow at {{locationName}} — see you there!",
     heading: "Tomorrow is the day",
     paragraph:
-      "Hi there,<br/>Just a quick reminder about tomorrow's booking at {{venueName}}. Here's everything you need to know.",
+      "Hi there,<br/>Just a quick reminder about tomorrow's booking at {{locationName}}. Here's everything you need to know.",
   },
 
   // family: waiver
@@ -110,7 +110,7 @@ const SYSTEM_TEMPLATES = [
     name: "Waiver request",
     family: "waiver",
     description: "Email sent to request guests to sign their waiver",
-    subject: "Sign your waiver before visiting {{venueName}}",
+    subject: "Sign your waiver before visiting {{locationName}}",
     heading: "Sign your waiver",
     paragraph:
       "Hi {{guestName}},<br/>A quick waiver makes check-in faster. Sign it now to skip the queue.",
@@ -120,17 +120,17 @@ const SYSTEM_TEMPLATES = [
     name: "Waiver complete",
     family: "waiver",
     description: "Sent to waiver signatory after waiver is signed",
-    subject: "Your waiver is signed — see you at {{venueName}}",
+    subject: "Your waiver is signed — see you at {{locationName}}",
     heading: "Waiver signed!",
     paragraph:
-      "Hi {{guestName}},<br/>Thanks for completing your waiver. We can't wait to see you at {{venueName}}.",
+      "Hi {{guestName}},<br/>Thanks for completing your waiver. We can't wait to see you at {{locationName}}.",
   },
   {
     slug: "waiverExpiryReminder",
     name: "Waiver expiry reminder",
     family: "waiver",
     description: "Reminder that waiver is about to expire",
-    subject: "Your {{venueName}} waiver is about to expire",
+    subject: "Your {{locationName}} waiver is about to expire",
     heading: "Waiver expiring soon",
     paragraph:
       "Hi {{guestName}},<br/>Your waiver is about to expire. Renew it now to skip the queue.",
@@ -140,7 +140,7 @@ const SYSTEM_TEMPLATES = [
     name: "Waiver reminder",
     family: "waiver",
     description: "Reminder email sent for waiver signing, unless the guest list feature is enabled",
-    subject: "Don't forget your waiver for {{venueName}}",
+    subject: "Don't forget your waiver for {{locationName}}",
     heading: "Waiver still needs signing",
     paragraph:
       "Hi {{guestName}},<br/>Skip the queue when you arrive — sign your waiver before your visit.",
@@ -152,17 +152,17 @@ const SYSTEM_TEMPLATES = [
     name: "Payment receipt",
     family: "payment",
     description: "Manually sent to the guest from VM or POS",
-    subject: "Your receipt from {{venueName}}",
+    subject: "Your receipt from {{locationName}}",
     heading: "Thanks for your payment",
     paragraph:
-      "Hi {{guestName}},<br/>Here's your receipt for your recent visit to {{venueName}}.",
+      "Hi {{guestName}},<br/>Here's your receipt for your recent visit to {{locationName}}.",
   },
   {
     slug: "paymentLink",
     name: "Payment link",
     family: "payment",
     description: "Email used to send guests payment links",
-    subject: "Action required: complete your payment for {{venueName}}",
+    subject: "Action required: complete your payment for {{locationName}}",
     heading: "Payment required",
     paragraph: "Hi {{guestName}},<br/>Please complete your payment to confirm your booking.",
   },
@@ -171,8 +171,8 @@ const SYSTEM_TEMPLATES = [
     name: "Invoice email",
     family: "payment",
     description:
-      "Email used to send guests an invoice from the booking details area of Venue Manager",
-    subject: "Invoice from {{venueName}}",
+      "Email used to send guests an invoice from the location booking details area",
+    subject: "Invoice from {{locationName}}",
     heading: "Your invoice is attached",
     paragraph:
       "Hi {{guestName}},<br/>Please find your invoice attached. Reach out if you have any questions.",
@@ -184,10 +184,10 @@ const SYSTEM_TEMPLATES = [
     name: "Giftcard received",
     family: "giftcard",
     description: "Sent to giftcard recipient",
-    subject: "You've received a giftcard from {{venueName}}",
+    subject: "You've received a giftcard from {{locationName}}",
     heading: "A gift just for you 🎁",
     paragraph:
-      "Hi there,<br/>Someone special has sent you a giftcard from {{venueName}}. Redeem it any time at checkout.",
+      "Hi there,<br/>Someone special has sent you a giftcard from {{locationName}}. Redeem it any time at checkout.",
   },
   {
     slug: "gift-card-sent",
@@ -197,7 +197,7 @@ const SYSTEM_TEMPLATES = [
     subject: "Your gift card has been sent",
     heading: "Gift card on its way",
     paragraph:
-      "Hi {{guestName}},<br/>Your gift card has been delivered. Thanks for sharing {{venueName}} with someone you love.",
+      "Hi {{guestName}},<br/>Your gift card has been delivered. Thanks for sharing {{locationName}} with someone you love.",
   },
 
   // family: membership
@@ -207,10 +207,10 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email containing membership details, sent to guest after purchasing memberships",
-    subject: "Welcome to {{venueName}} — your membership is active",
+    subject: "Welcome to {{locationName}} — your membership is active",
     heading: "You're a member!",
     paragraph:
-      "Hi {{guestName}},<br/>Your membership at {{venueName}} is now active. See your benefits below.",
+      "Hi {{guestName}},<br/>Your membership at {{locationName}} is now active. See your benefits below.",
   },
   {
     slug: "membership-purchase-receipt",
@@ -218,17 +218,17 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent after membership purchase with membership details, redemption QR, and usage instructions",
-    subject: "Your {{venueName}} membership details",
+    subject: "Your {{locationName}} membership details",
     heading: "Your membership is ready",
     paragraph:
-      "Hi {{guestName}},<br/>Your {{membershipName}} membership is active for {{venueName}}. Show the QR code at the POS or front desk to redeem.",
+      "Hi {{guestName}},<br/>Your {{membershipName}} membership is active for {{locationName}}. Show the QR code at the POS or front desk to redeem.",
   },
   {
     slug: "membership-1st-failed-payment",
     name: "Membership 1st failed payment",
     family: "membership",
     description: "Email sent to guest after 1st failed payment",
-    subject: "Action needed: payment failed for your {{venueName}} membership",
+    subject: "Action needed: payment failed for your {{locationName}} membership",
     heading: "Payment couldn't be processed",
     paragraph:
       "Hi {{guestName}},<br/>We weren't able to charge your card for this period's membership fee. Please update your payment details to avoid disruption.",
@@ -238,7 +238,7 @@ const SYSTEM_TEMPLATES = [
     name: "Membership 3rd failed payment",
     family: "membership",
     description: "Email sent to guest after 3rd failed payment",
-    subject: "Final notice: {{venueName}} membership at risk",
+    subject: "Final notice: {{locationName}} membership at risk",
     heading: "Final payment notice",
     paragraph:
       "Hi {{guestName}},<br/>This is the third time we couldn't process your membership payment. Please update your card now or your membership will be cancelled.",
@@ -249,7 +249,7 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent to guest after 2nd failed payment to notify their membership has been suspended",
-    subject: "Your {{venueName}} membership has been suspended",
+    subject: "Your {{locationName}} membership has been suspended",
     heading: "Membership suspended",
     paragraph:
       "Hi {{guestName}},<br/>Following repeated payment failures, your membership has been suspended. Update your payment details to reactivate it.",
@@ -260,17 +260,17 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent to guest to notify them that their membership is active after successful payment",
-    subject: "Payment received — your {{venueName}} membership is active",
+    subject: "Payment received — your {{locationName}} membership is active",
     heading: "Payment received",
     paragraph:
-      "Hi {{guestName}},<br/>Your payment was successful and your membership is active. Thanks for being part of {{venueName}}.",
+      "Hi {{guestName}},<br/>Your payment was successful and your membership is active. Thanks for being part of {{locationName}}.",
   },
   {
     slug: "membership-cancelled",
     name: "Membership cancelled",
     family: "membership",
     description: "Email sent to guest after their membership has been cancelled",
-    subject: "Your {{venueName}} membership has been cancelled",
+    subject: "Your {{locationName}} membership has been cancelled",
     heading: "Membership cancelled",
     paragraph:
       "Hi {{guestName}},<br/>Your membership has been cancelled as requested. We'd love to have you back any time.",
@@ -280,7 +280,7 @@ const SYSTEM_TEMPLATES = [
     name: "Membership expired",
     family: "membership",
     description: "Email sent to guest after their membership has expired",
-    subject: "Your {{venueName}} membership has expired",
+    subject: "Your {{locationName}} membership has expired",
     heading: "Membership expired",
     paragraph:
       "Hi {{guestName}},<br/>Your membership has expired. Renew now to keep your perks.",
@@ -291,8 +291,8 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent to guest 30 and 60 days after their membership was expired/cancelled to prompt them to renew",
-    subject: "We miss you at {{venueName}}",
-    heading: "Come back to {{venueName}}",
+    subject: "We miss you at {{locationName}}",
+    heading: "Come back to {{locationName}}",
     paragraph:
       "Hi {{guestName}},<br/>It's been a while. Renew your membership today and we'll have something special waiting for you.",
   },
@@ -302,7 +302,7 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent to guest after they have requested to cancel their membership via online accounts",
-    subject: "Your {{venueName}} cancellation request is being processed",
+    subject: "Your {{locationName}} cancellation request is being processed",
     heading: "Cancellation pending",
     paragraph:
       "Hi {{guestName}},<br/>We've received your request to cancel. Your membership will end at the close of the current period.",
@@ -313,7 +313,7 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent when an add-on member is added or removed from a group membership",
-    subject: "Your {{venueName}} group membership has been updated",
+    subject: "Your {{locationName}} group membership has been updated",
     heading: "Group membership updated",
     paragraph:
       "Hi {{guestName}},<br/>A change has been made to your group membership. See the updated details below.",
@@ -324,7 +324,7 @@ const SYSTEM_TEMPLATES = [
     family: "membership",
     description:
       "Email sent to guests to update payment details for recurring memberships",
-    subject: "Update your payment details for {{venueName}}",
+    subject: "Update your payment details for {{locationName}}",
     heading: "Update your card on file",
     paragraph:
       "Hi {{guestName}},<br/>Please update your payment details to keep your recurring membership active.",
@@ -336,7 +336,7 @@ const SYSTEM_TEMPLATES = [
     name: "Guest deleted",
     family: "simple",
     description: "Email sent to guests when their details have been deleted",
-    subject: "Your {{venueName}} account has been deleted",
+    subject: "Your {{locationName}} account has been deleted",
     heading: "Account removed",
     paragraph:
       "Hi there,<br/>Your account and personal details have been deleted as requested. We're sorry to see you go.",
@@ -346,7 +346,7 @@ const SYSTEM_TEMPLATES = [
     name: "Discount code issued",
     family: "simple",
     description: "Email sent when a discount code is issued on product purchase",
-    subject: "Here's your discount code from {{venueName}}",
+    subject: "Here's your discount code from {{locationName}}",
     heading: "A discount, just for you",
     paragraph:
       "Hi {{guestName}},<br/>Here's a special discount code as a thank-you. Use it on your next visit.",
@@ -357,7 +357,7 @@ const SYSTEM_TEMPLATES = [
     family: "simple",
     description:
       "Email sent to guests to remind them to redeem their loyalty rewards before they expire",
-    subject: "Your {{venueName}} rewards expire soon",
+    subject: "Your {{locationName}} rewards expire soon",
     heading: "Rewards expiring soon",
     paragraph:
       "Hi {{guestName}},<br/>You have unused loyalty rewards that are about to expire. Redeem them on your next visit.",

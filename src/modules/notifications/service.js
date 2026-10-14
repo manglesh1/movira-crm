@@ -6,6 +6,7 @@ const transactionalService = require("../transactional/service");
 const auditService = require("../audit/service");
 const contactService = require("../contacts/service");
 const queueJobs = require("../queueJobs/service");
+const { isMoviraControlEvent } = require("../../shared/communicationScope");
 
 async function safeAudit(input) {
   try {
@@ -71,7 +72,11 @@ async function ingestEvent(body) {
   const result = await transactionalService.enqueueMessage(transactionalRequest);
   // Security messages belong only in the transactional delivery pipeline.
   // Never copy recovery codes into customer profiles or marketing jobs.
-  if (result.duplicate || eventMeta.skipContactAutomation === true) {
+  if (
+    result.duplicate ||
+    eventMeta.skipContactAutomation === true ||
+    isMoviraControlEvent(event.eventType)
+  ) {
     return {
       duplicate: Boolean(result.duplicate),
       messageId: result.message.id,
@@ -81,7 +86,13 @@ async function ingestEvent(body) {
       bindingId: binding.id,
       contactId: null,
       contactCreated: false,
-      automation: [{ skipped: result.duplicate ? "duplicate_event" : "security_event" }],
+      automation: [{
+        skipped: result.duplicate
+          ? "duplicate_event"
+          : isMoviraControlEvent(event.eventType)
+            ? "movira_control_event"
+            : "security_event",
+      }],
     };
   }
 
@@ -164,6 +175,11 @@ async function ingestEvent(body) {
 
 function assertBindingScope(binding, scope = {}) {
   if (scope.isSuperAdmin) return binding;
+  if (isMoviraControlEvent(binding?.eventType)) {
+    throw httpError(403, "Movira Control event bindings are available only to Super Admin.", {
+      code: "movira_control_binding_access_denied",
+    });
+  }
   const requestedLocationId = Number(scope.locationId);
   const bindingLocationId =
     binding?.locationId === null || binding?.locationId === undefined
@@ -211,7 +227,10 @@ async function listBindings(query = {}, scope = {}) {
         : Number(query.locationId);
   }
   if (!scope.isSuperAdmin) filter.locationId = Number(scope.locationId);
-  return repository.listBindings(filter);
+  const bindings = await repository.listBindings(filter);
+  return scope.isSuperAdmin
+    ? bindings
+    : bindings.filter((binding) => !isMoviraControlEvent(binding.eventType));
 }
 
 async function getBinding(id, scope = {}) {
@@ -228,6 +247,11 @@ async function createBinding(body, scope = {}) {
   const data = validation.value;
   if (!eventRegistry.isRegistered(data.eventType)) {
     throw httpError(400, `Unknown eventType: ${data.eventType}`);
+  }
+  if (!scope.isSuperAdmin && isMoviraControlEvent(data.eventType)) {
+    throw httpError(403, "Movira Control event bindings can be managed only by Super Admin.", {
+      code: "movira_control_binding_access_denied",
+    });
   }
 
   try {
@@ -266,6 +290,11 @@ async function updateBinding(id, body, scope = {}) {
   if (validation.value.eventType && !eventRegistry.isRegistered(validation.value.eventType)) {
     throw httpError(400, `Unknown eventType: ${validation.value.eventType}`);
   }
+  if (!scope.isSuperAdmin && isMoviraControlEvent(validation.value.eventType || binding.eventType)) {
+    throw httpError(403, "Movira Control event bindings can be managed only by Super Admin.", {
+      code: "movira_control_binding_access_denied",
+    });
+  }
 
   const updated = await repository.updateBinding(binding, validation.value);
   await safeAudit({
@@ -293,8 +322,11 @@ async function deleteBinding(id, scope = {}) {
   return { id };
 }
 
-function listEvents() {
-  return eventRegistry.listEvents();
+function listEvents(scope = {}) {
+  const events = eventRegistry.listEvents();
+  return scope.isSuperAdmin
+    ? events
+    : events.filter((event) => !isMoviraControlEvent(event.eventType));
 }
 
 module.exports = {

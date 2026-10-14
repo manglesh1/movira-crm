@@ -8,6 +8,7 @@ const providerDomain = require("./providerDomainService");
 const warmupService = require("../../messaging-core/warmup/senderWarmupService");
 const { decryptJsonIfNeeded } = require("../../../shared/credentialVault");
 const config = require("../../../config");
+const emailDeliveryPolicy = require("../../../shared/emailDeliveryPolicy");
 
 const ROUTE_DEFINITIONS = [
   { routeKey: "calendar", label: "Calendar Domain" },
@@ -57,6 +58,9 @@ async function getEmailSettings({ locationId }) {
     : [];
 
   const sharedMoviraUsage = getSharedMoviraUsage(domains);
+  const deliveryControls = locationId
+    ? await emailDeliveryPolicy.getPreferences(Number(locationId), { fresh: true })
+    : { transactionalEmailEnabled: false, marketingEmailEnabled: false };
   const providerHealth = new Map(await Promise.all(providers.map(async (provider) => [
     provider.id,
     await providerWebhookHealth(provider, {
@@ -77,6 +81,7 @@ async function getEmailSettings({ locationId }) {
     providerOptions: PROVIDER_OPTIONS,
     providers: providers.map((provider) => serializeProvider(provider, { webhookHealth: providerHealth.get(provider.id) })),
     activeProviderRoutes: buildActiveProviderRoutes(providers),
+    deliveryControls,
     domains: domains.map((row) => serializeDomain(row, { sharedMoviraUsage })),
     routes: routes.map(serializeRoute),
   };
@@ -180,7 +185,7 @@ async function createDomain(body = {}) {
     where: { locationId: Number(body.locationId), domain },
   });
   if (dup) {
-    const err = new Error("This domain is already configured for the venue");
+    const err = new Error("This domain is already configured for the location");
     err.statusCode = 409;
     throw err;
   }

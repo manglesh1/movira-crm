@@ -4,6 +4,7 @@ const { DELIVERY_EVENT, STATUS } = require("./constants");
 const suppressionService = require("../marketing/email/suppressionService");
 const warmupService = require("../messaging-core/warmup/senderWarmupService");
 const capacityService = require("../messaging-core/capacity/providerCapacityService");
+const emailDeliveryPolicy = require("../../shared/emailDeliveryPolicy");
 
 async function processTransactionalSqsMessage(sqsMessage) {
   const body = parseBody(sqsMessage.Body);
@@ -22,6 +23,19 @@ async function processTransactionalSqsMessage(sqsMessage) {
       reason: `message_already_${message.status}`,
       messageId: message.id,
     };
+  }
+
+  try {
+    await emailDeliveryPolicy.assertEnabled("transactional", message, { fresh: true });
+  } catch (error) {
+    if (error.code !== "transactional_email_disabled") throw error;
+    await message.update({ status: STATUS.CANCELLED, lastError: error.code });
+    await repository.createDeliveryEvent({
+      messageId: message.id,
+      eventType: "cancelled",
+      payload: { source: "transactional-worker", reason: error.code },
+    });
+    return { skipped: true, reason: error.code, messageId: message.id };
   }
 
   if (message.channel === "email") {

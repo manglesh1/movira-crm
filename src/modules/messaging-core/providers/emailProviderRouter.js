@@ -7,6 +7,11 @@ const moviraSesProvider = require("./sesEmailProvider");
 const domainSenderResolver = require("./domainSenderResolver");
 const replyForwardService = require("../../settings/email/replyForwardService");
 const { decryptJsonIfNeeded } = require("../../../shared/credentialVault");
+const emailDeliveryPolicy = require("../../../shared/emailDeliveryPolicy");
+const {
+  MOVIRA_CONTROL_SCOPE,
+  isMoviraControlEvent,
+} = require("../../../shared/communicationScope");
 
 function providerUseCase(kind) {
   return kind === "transactional" ? "transactional" : "marketing";
@@ -38,6 +43,23 @@ async function sendMarketingEmail(input = {}) {
 
 async function sendEmail(input = {}) {
   const useCase = providerUseCase(input.useCase);
+  const isMoviraControl =
+    input.communicationScope === MOVIRA_CONTROL_SCOPE ||
+    isMoviraControlEvent(input.sourceEventType);
+  if (!isMoviraControl) {
+    await emailDeliveryPolicy.assertEnabled(useCase, input);
+  }
+  if (isMoviraControl) {
+    const controlInput = { ...input };
+    delete controlInput.from;
+    delete controlInput.replyTo;
+    delete controlInput.bcc;
+    const result = await moviraSesProvider.sendTransactionalEmail({
+      ...controlInput,
+      useCase: "transactional",
+    });
+    return enrichResult(result, null, null);
+  }
   const [sender, deliverySettings] = await Promise.all([
     useCase === "marketing" ? domainSenderResolver.requireMarketingSender({ locationId: input.locationId, from: input.from }) : domainSenderResolver.resolveSender({
       locationId: input.locationId,

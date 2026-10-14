@@ -2,6 +2,98 @@ const { createDefaultDesign } = require("./defaultDesign");
 
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
 
+const DEFAULT_BRAND_PALETTE = Object.freeze({
+  "#7220e6": "primary",
+  "#480d9a": "secondary",
+  "#a66bff": "accent",
+  "#24113f": "navy",
+  "#5c1ab1": "navySoft",
+  "#f8f6fc": "canvas",
+  "#f3ecfd": "soft",
+  "#d9c7f3": "border",
+  "#e9dff7": "divider",
+  "#241a33": "text",
+  "#756a82": "muted",
+  "#eee4fc": "onDarkMuted",
+});
+
+function validHex(value) {
+  const normalized = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized.toUpperCase() : null;
+}
+
+function mixHex(color, target, amount) {
+  const from = validHex(color);
+  const to = validHex(target);
+  if (!from || !to) return from || to;
+  const mixed = [1, 3, 5].map((offset) => {
+    const start = Number.parseInt(from.slice(offset, offset + 2), 16);
+    const end = Number.parseInt(to.slice(offset, offset + 2), 16);
+    return Math.round(start + (end - start) * amount).toString(16).padStart(2, "0");
+  });
+  return `#${mixed.join("")}`.toUpperCase();
+}
+
+function brandTheme(data = {}) {
+  const primary = validHex(data.emailBrandPrimaryColor || data.brandPrimaryColor || data.brand?.primaryColor);
+  const secondary = validHex(data.emailBrandSecondaryColor || data.brandSecondaryColor || data.brand?.secondaryColor);
+  if (!primary && !secondary) return null;
+  const resolvedPrimary = primary || secondary;
+  const resolvedSecondary = secondary || mixHex(resolvedPrimary, "#000000", 0.28);
+  return {
+    primary: resolvedPrimary,
+    secondary: resolvedSecondary,
+    accent: mixHex(resolvedPrimary, "#FFFFFF", 0.34),
+    navy: mixHex(resolvedSecondary, "#000000", 0.34),
+    navySoft: mixHex(resolvedSecondary, resolvedPrimary, 0.35),
+    canvas: mixHex(resolvedPrimary, "#FFFFFF", 0.97),
+    soft: mixHex(resolvedPrimary, "#FFFFFF", 0.91),
+    border: mixHex(resolvedPrimary, "#FFFFFF", 0.76),
+    divider: mixHex(resolvedPrimary, "#FFFFFF", 0.88),
+    text: mixHex(resolvedSecondary, "#000000", 0.62),
+    muted: mixHex(resolvedSecondary, "#FFFFFF", 0.42),
+    onDarkMuted: mixHex(resolvedPrimary, "#FFFFFF", 0.86),
+  };
+}
+
+function replaceBrandColors(value, theme) {
+  if (typeof value !== "string" || !theme) return value;
+  let output = value;
+  for (const [source, key] of Object.entries(DEFAULT_BRAND_PALETTE)) {
+    output = output.replace(new RegExp(source.replace("#", "\\#"), "gi"), theme[key]);
+  }
+  output = output.replace(/rgba\(72\s*,\s*13\s*,\s*154\s*,\s*([\d.]+)\)/gi, (_match, alpha) => {
+    const hex = theme.secondary.slice(1);
+    return `rgba(${Number.parseInt(hex.slice(0, 2), 16)},${Number.parseInt(hex.slice(2, 4), 16)},${Number.parseInt(hex.slice(4, 6), 16)},${alpha})`;
+  });
+  return output;
+}
+
+function applyBrandTheme(designJson, data = {}) {
+  const theme = brandTheme(data);
+  if (!theme) return designJson;
+  const visit = (value) => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== "object") return replaceBrandColors(value, theme);
+    const next = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item)]));
+    if (next.type === "button") {
+      next.settings = { ...(next.settings || {}), backgroundColor: theme.primary };
+    }
+    return next;
+  };
+  const branded = visit(designJson);
+  branded.settings = {
+    ...(branded.settings || {}),
+    linkColor: theme.primary,
+    buttonColor: theme.primary,
+  };
+  return branded;
+}
+
+function applyBrandThemeToHtml(html, data = {}) {
+  return replaceBrandColors(String(html || ""), brandTheme(data));
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -698,7 +790,8 @@ function renderSection(section, settings, data) {
 }
 
 function renderDesign(designJson, options = {}) {
-  const design = designJson && typeof designJson === "object" ? designJson : createDefaultDesign();
+  const sourceDesign = designJson && typeof designJson === "object" ? designJson : createDefaultDesign();
+  const design = applyBrandTheme(sourceDesign, options.data || {});
   const settings = { ...createDefaultDesign().settings, ...(design.settings || {}) };
   const sections = Array.isArray(design.sections) ? design.sections : [];
   const mobileCss = buildMobileCss(sections);
@@ -860,4 +953,6 @@ module.exports = {
   interpolate,
   escapeHtml,
   applyTracking,
+  applyBrandTheme,
+  applyBrandThemeToHtml,
 };

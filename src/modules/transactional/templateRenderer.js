@@ -1,5 +1,5 @@
 const repository = require("./repository");
-const { renderDesign, applyTracking } = require("../marketing/email/builder/renderer");
+const { renderDesign, applyTracking, applyBrandThemeToHtml } = require("../marketing/email/builder/renderer");
 const { createDefaultDesign } = require("../marketing/email/builder/defaultDesign");
 
 const TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
@@ -58,6 +58,10 @@ function normalizePayload(payload = {}) {
       (payload.templateScope === "movira_control"
         ? "Secure Movira Control communication"
         : "Secure location communication"),
+    emailBrandPrimaryColor:
+      payload.emailBrandPrimaryColor || payload.brandPrimaryColor || payload.brand?.primaryColor || "",
+    emailBrandSecondaryColor:
+      payload.emailBrandSecondaryColor || payload.brandSecondaryColor || payload.brand?.secondaryColor || "",
     bookingNumber: payload.bookingNumber || booking.number || "",
     bookingName: payload.bookingName || booking.name || "",
     bookingDate: payload.bookingDate || booking.date || "",
@@ -102,7 +106,10 @@ function renderTemplate(template, payload, { tracking = null } = {}) {
 
   return {
     subject,
-    body: applyTracking(interpolate(template.body, normalizedPayload), tracking),
+    body: applyTracking(
+      applyBrandThemeToHtml(interpolate(template.body, normalizedPayload), normalizedPayload),
+      tracking
+    ),
     text: interpolate(template.plainText, normalizedPayload),
     template,
   };

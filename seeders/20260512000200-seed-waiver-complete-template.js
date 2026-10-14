@@ -4,14 +4,14 @@ const template = {
   key: "waiver-complete",
   name: "Waiver completion confirmation",
   category: "waiver",
-  subject: "Your waiver is signed - {{venueName}}",
+  subject: "Your waiver is signed - {{locationName}}",
   body: [
     "<h1>Waiver signed</h1>",
     "<p>Hi {{guestName}},</p>",
-    "<p>Thanks for completing your waiver for {{venueName}}.</p>",
+    "<p>Thanks for completing your waiver for {{locationName}}.</p>",
     "<p>Your waiver is valid until {{expiryDate}} ({{expiryDays}} days).</p>",
   ].join("\n"),
-  variables: ["guestName", "venueName", "expiryDate", "expiryDays"],
+  variables: ["guestName", "locationName", "expiryDate", "expiryDays"],
 };
 
 const binding = {

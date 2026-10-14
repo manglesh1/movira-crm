@@ -1,9 +1,10 @@
 const config = require("../../../config");
 const { getModels } = require("../../../db/models");
 const emailProvider = require("../../messaging-core/providers/emailProviderRouter");
-const { renderDesign, interpolate } = require("./builder/renderer");
+const { renderDesign, interpolate, applyBrandThemeToHtml } = require("./builder/renderer");
 const { createDefaultDesign } = require("./builder/defaultDesign");
 const { renderRawTemplate } = require("./rawTemplateRenderer");
+const platformBranding = require("../../../shared/platformBranding");
 
 function trackingUrls(messageId) {
   const base = config.urls.trackingBaseUrl;
@@ -48,7 +49,11 @@ async function dispatch(message) {
 
   const payload = message.payload || {};
   const from = payload.from || undefined;
-  const rendered = renderMessageTemplate(message, template, { tracking: trackingUrls(message.id) });
+  const branding = await platformBranding.getEmailBranding(message.locationId);
+  const rendered = renderMessageTemplate(message, template, {
+    tracking: trackingUrls(message.id),
+    branding,
+  });
 
   return emailProvider.sendMarketingEmail({
     locationId: message.locationId,
@@ -73,13 +78,15 @@ async function renderStoredMessage(message, { tracking = null } = {}) {
   if (!template) {
     throw new Error(`Marketing template not found for message ${message.id}`);
   }
-  return renderMessageTemplate(message, template, { tracking });
+  const branding = await platformBranding.getEmailBranding(message.locationId);
+  return renderMessageTemplate(message, template, { tracking, branding });
 }
 
-function renderMessageTemplate(message, template, { tracking = null } = {}) {
+function renderMessageTemplate(message, template, { tracking = null, branding = {} } = {}) {
   const payload = message.payload || {};
   const data = {
     ...(payload.data || payload.mergeData || {}),
+    ...branding,
     ...publicMessageUrls(message.id),
   };
   const subject = interpolate(message.subject || payload.subject || template.name, data);
@@ -94,7 +101,11 @@ function renderMessageTemplate(message, template, { tracking = null } = {}) {
   }
 
   const rendered = renderRawTemplate({ editorType: template.editorType, htmlBody: template.htmlBody, plainText: template.plainText, data, tracking });
-  return { subject, html: rendered.htmlBody, text: rendered.plainText };
+  return {
+    subject,
+    html: applyBrandThemeToHtml(rendered.htmlBody, data),
+    text: rendered.plainText,
+  };
 }
 
 module.exports = {

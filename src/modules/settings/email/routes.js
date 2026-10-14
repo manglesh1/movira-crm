@@ -24,7 +24,7 @@ function sendError(res, err) {
 
 router.get("/", async (req, res, next) => {
   try {
-    const data = await service.getEmailSettings(req.query);
+    const data = await service.getEmailSettings({ ...req.query, locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -33,7 +33,10 @@ router.get("/", async (req, res, next) => {
 
 router.post("/providers", async (req, res, next) => {
   try {
-    const data = await service.createProvider(req.body);
+    const data = await service.createProvider({
+      ...(req.body || {}),
+      locationId: req.crmLocationId,
+    });
     res.status(201).json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -45,7 +48,10 @@ router.post("/providers", async (req, res, next) => {
 // chosen provider type without persisting anything. Returns { ok, message }.
 router.post("/providers/verify-config", async (req, res, next) => {
   try {
-    const data = await service.verifyProviderConfig(req.body);
+    const data = await service.verifyProviderConfig({
+      ...(req.body || {}),
+      locationId: req.crmLocationId,
+    });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -76,7 +82,7 @@ router.delete("/providers/:id", async (req, res, next) => {
 
 router.get("/domains", async (req, res, next) => {
   try {
-    const data = await service.listDomains({ locationId: req.query.locationId });
+    const data = await service.listDomains({ locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -96,7 +102,10 @@ router.get("/domains/:id", async (req, res, next) => {
 
 router.post("/domains", async (req, res, next) => {
   try {
-    const data = await service.createDomain(req.body);
+    const data = await service.createDomain({
+      ...(req.body || {}),
+      locationId: req.crmLocationId,
+    });
     res.status(201).json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -148,7 +157,7 @@ router.delete("/domains/:id", async (req, res, next) => {
 
 router.get("/routes", async (req, res, next) => {
   try {
-    const data = await service.listDomainRoutes({ locationId: req.query.locationId });
+    const data = await service.listDomainRoutes({ locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -160,7 +169,7 @@ router.get("/routes", async (req, res, next) => {
 
 router.get("/reply-forward", async (req, res, next) => {
   try {
-    const data = await replyForwardService.getReplyForward(req.query);
+    const data = await replyForwardService.getReplyForward({ locationId: req.crmLocationId });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -170,8 +179,10 @@ router.get("/reply-forward", async (req, res, next) => {
 
 router.put("/reply-forward", async (req, res, next) => {
   try {
-    const locationId = req.body?.locationId || req.query?.locationId;
-    const data = await replyForwardService.updateReplyForward({ ...req.body, locationId });
+    const data = await replyForwardService.updateReplyForward({
+      ...(req.body || {}),
+      locationId: req.crmLocationId,
+    });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -183,7 +194,10 @@ router.put("/reply-forward", async (req, res, next) => {
 
 router.get("/analytics", async (req, res, next) => {
   try {
-    const data = await analyticsService.getEmailAnalytics(req.query);
+    const data = await analyticsService.getEmailAnalytics({
+      ...(req.query || {}),
+      locationId: req.crmLocationId,
+    });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);
@@ -193,7 +207,10 @@ router.get("/analytics", async (req, res, next) => {
 
 router.get("/bounce-classification", async (req, res, next) => {
   try {
-    const data = await analyticsService.getBounceClassification(req.query);
+    const data = await analyticsService.getBounceClassification({
+      ...(req.query || {}),
+      locationId: req.crmLocationId,
+    });
     res.json({ success: true, data });
   } catch (err) {
     if (err.statusCode) return sendError(res, err);

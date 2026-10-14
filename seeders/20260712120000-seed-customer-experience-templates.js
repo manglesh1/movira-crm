@@ -26,21 +26,21 @@ const templates = [
     family: "customer_experience",
     category: "customer-experience",
     description: "Ask a guest to rate their recent visit via a survey link.",
-    subject: "How was your visit to {{venueName}}?",
+    subject: "How was your visit to {{locationName}}?",
     heading: "How was your visit?",
     paragraph:
-      "Hi {{guestName}},<br/>Thanks for visiting <strong>{{venueName}}</strong>. We'd love to hear how your recent visit went.<br/><br/>The survey takes about a minute and helps our team improve every visit.{{rewardTeaser}}",
+      "Hi {{guestName}},<br/>Thanks for visiting <strong>{{locationName}}</strong>. We'd love to hear how your recent visit went.<br/><br/>The survey takes about a minute and helps our team improve every visit.{{rewardTeaser}}",
   },
   {
     slug: "customerExperienceFeedbackReceived",
     name: "Customer experience - feedback received",
     family: "customer_experience",
     category: "customer-experience",
-    description: "Notify configured venue staff when a guest submits a matching survey response.",
-    subject: "New {{ratingOverall}}/5 guest feedback - {{venueName}}",
+    description: "Notify configured location staff when a guest submits a matching survey response.",
+    subject: "New {{ratingOverall}}/5 guest feedback - {{locationName}}",
     heading: "New guest feedback",
     paragraph:
-      "<strong>{{guestName}}</strong> submitted a {{ratingOverall}}/5 response for {{venueName}}. Review the response and follow up when needed.",
+      "<strong>{{guestName}}</strong> submitted a {{ratingOverall}}/5 response for {{locationName}}. Review the response and follow up when needed.",
   },
   {
     slug: "customerExperienceRecoveryReply",
@@ -48,10 +48,10 @@ const templates = [
     family: "customer_experience",
     category: "customer-experience",
     description: "Staff reply to a guest following low or at-risk feedback.",
-    subject: "A message from {{venueName}}",
+    subject: "A message from {{locationName}}",
     heading: "We'd like to make this right",
     paragraph:
-      "Hi {{guestName}},<br/>{{replyMessage}}<br/><br/>Thank you,<br/><strong>{{venueName}}</strong>",
+      "Hi {{guestName}},<br/>{{replyMessage}}<br/><br/>Thank you,<br/><strong>{{locationName}}</strong>",
   },
   {
     slug: "customerExperienceRewardIssued",
@@ -59,10 +59,10 @@ const templates = [
     family: "customer_experience",
     category: "customer-experience",
     description: "Send a guest their thank-you reward code after staff verify a public review claim.",
-    subject: "Your reward from {{venueName}}",
+    subject: "Your reward from {{locationName}}",
     heading: "Thanks for sharing the love",
     paragraph:
-      "Hi {{guestName}},<br/>Thanks for taking a moment to review <strong>{{venueName}}</strong> — it means a lot to our team.<br/><br/>Here is your {{rewardOffer}}reward code:<br/><strong style=\"font-size:20px;letter-spacing:2px;\">{{rewardCode}}</strong><br/>{{rewardExpiryLine}}<br/><br/>{{rewardMessage}}<br/><br/>See you soon,<br/><strong>{{venueName}}</strong>",
+      "Hi {{guestName}},<br/>Thanks for taking a moment to review <strong>{{locationName}}</strong> — it means a lot to our team.<br/><br/>Here is your {{rewardOffer}}reward code:<br/><strong style=\"font-size:20px;letter-spacing:2px;\">{{rewardCode}}</strong><br/>{{rewardExpiryLine}}<br/><br/>{{rewardMessage}}<br/><br/>See you soon,<br/><strong>{{locationName}}</strong>",
   },
 ];
 

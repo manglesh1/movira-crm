@@ -4,6 +4,7 @@ const rateLimiter = require("./sendRateLimiter");
 const suppressionService = require("./suppressionService");
 const warmupService = require("../../messaging-core/warmup/senderWarmupService");
 const capacityService = require("../../messaging-core/capacity/providerCapacityService");
+const emailDeliveryPolicy = require("../../../shared/emailDeliveryPolicy");
 
 const TERMINAL_STATUSES = ["sent", "delivered", "bounced", "complained", "unsubscribed", "cancelled"];
 
@@ -33,6 +34,27 @@ async function processMarketingSqsMessage(sqsMessage) {
       reason: `message_already_${message.status}`,
       messageId: message.id,
     };
+  }
+
+  try {
+    await emailDeliveryPolicy.assertEnabled("marketing", message, { fresh: true });
+  } catch (error) {
+    if (error.code !== "marketing_email_disabled") throw error;
+    await message.update({
+      status: "cancelled",
+      metadata: {
+        ...(message.metadata || {}),
+        cancelledAt: new Date().toISOString(),
+        cancelReason: error.code,
+      },
+    });
+    await repository.createDeliveryEvent({
+      messageId: message.id,
+      campaignId: message.campaignId,
+      eventType: "cancelled",
+      payload: { source: "marketing-worker", reason: error.code },
+    });
+    return { skipped: true, reason: error.code, messageId: message.id };
   }
 
   const campaign = message.campaignId && message.getCampaign ? await message.getCampaign() : null;

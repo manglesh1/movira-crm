@@ -17,6 +17,7 @@ function sendError(res, err) {
   return res.status(err.statusCode || 500).json({
     success: false,
     error: err.message || "Internal server error",
+    code: err.code || undefined,
     errors: err.errors || [],
   });
 }

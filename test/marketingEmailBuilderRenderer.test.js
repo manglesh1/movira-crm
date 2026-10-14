@@ -12,6 +12,29 @@ test("renders the default marketing email design as table-based HTML", () => {
   assert.match(html, /Start from scratch/);
 });
 
+test("applies centrally supplied white-label colours at render time", () => {
+  const design = createDefaultDesign({
+    settings: { linkColor: "#7220E6", buttonColor: "#7220E6" },
+    sections: [
+      {
+        id: "brand_section",
+        type: "section",
+        settings: { backgroundColor: "#480D9A" },
+        columns: [{ id: "brand_column", width: "100%", blocks: [{ id: "brand_button", type: "button", content: "Continue", settings: { href: "https://example.test", backgroundColor: "#7220E6" } }] }],
+      },
+    ],
+  });
+
+  const { html } = renderDesign(design, {
+    data: { emailBrandPrimaryColor: "#0F766E", emailBrandSecondaryColor: "#134E4A" },
+  });
+
+  assert.match(html, /#0F766E/);
+  assert.match(html, /#134E4A/);
+  assert.doesNotMatch(html, /#7220E6/i);
+  assert.doesNotMatch(html, /#480D9A/i);
+});
+
 test("interpolates merge tags and escapes button labels", () => {
   const design = {
     schemaVersion: 1,

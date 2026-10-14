@@ -15,6 +15,10 @@ router.use(auth, authorizeLocation({
   requireLocation: true,
 }));
 
+function templateScope(req) {
+  return { isSuperAdmin: Boolean(req.crmAuthz?.isSuperAdmin) };
+}
+
 router.get("/overview", (_req, res) => {
   res.json({
     success: true,
@@ -90,7 +94,7 @@ function handleError(err, res, next) {
 
 router.get("/templates", async (req, res, next) => {
   try {
-    const data = await templateService.listTemplates(req.query);
+    const data = await templateService.listTemplates(req.query, templateScope(req));
     res.json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
@@ -99,7 +103,7 @@ router.get("/templates", async (req, res, next) => {
 
 router.get("/templates/:id", async (req, res, next) => {
   try {
-    const data = await templateService.getTemplate(req.params.id);
+    const data = await templateService.getTemplate(req.params.id, {}, templateScope(req));
     res.json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
@@ -108,7 +112,7 @@ router.get("/templates/:id", async (req, res, next) => {
 
 router.post("/templates", async (req, res, next) => {
   try {
-    const data = await templateService.createTemplate(req.body, req.user);
+    const data = await templateService.createTemplate(req.body, req.user, templateScope(req));
     res.status(201).json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
@@ -117,7 +121,7 @@ router.post("/templates", async (req, res, next) => {
 
 router.patch("/templates/:id", async (req, res, next) => {
   try {
-    const data = await templateService.updateTemplate(req.params.id, req.body, req.user);
+    const data = await templateService.updateTemplate(req.params.id, req.body, req.user, templateScope(req));
     res.json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
@@ -126,7 +130,7 @@ router.patch("/templates/:id", async (req, res, next) => {
 
 router.delete("/templates/:id", async (req, res, next) => {
   try {
-    const data = await templateService.deleteTemplate(req.params.id);
+    const data = await templateService.deleteTemplate(req.params.id, templateScope(req));
     res.json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
@@ -135,7 +139,7 @@ router.delete("/templates/:id", async (req, res, next) => {
 
 router.post("/templates/:id/clone", async (req, res, next) => {
   try {
-    const data = await templateService.cloneTemplate(req.params.id, req.body || {}, req.user);
+    const data = await templateService.cloneTemplate(req.params.id, req.body || {}, req.user, templateScope(req));
     res.status(201).json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
@@ -144,7 +148,7 @@ router.post("/templates/:id/clone", async (req, res, next) => {
 
 router.post("/templates/:id/test-send", async (req, res, next) => {
   try {
-    const data = await templateService.testSendTemplate(req.params.id, req.body || {});
+    const data = await templateService.testSendTemplate(req.params.id, req.body || {}, templateScope(req));
     res.json({ success: true, data });
   } catch (err) {
     handleError(err, res, next);
