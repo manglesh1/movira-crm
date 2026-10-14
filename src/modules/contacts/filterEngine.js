@@ -284,6 +284,12 @@ function buildCondition(condition, fieldMap, now = new Date()) {
   }
 
   if (type === "enum") {
+    // Saved Movira filters predate the booking source; keep their audience.
+    if (condition.field === "sourceType" && toArray(value).includes("movira")) {
+      const sources = [...new Set([...toArray(value), "booking"])];
+      if (["is", "is_one_of"].includes(operator)) return frag(ref, { [Op.in]: sources });
+      if (operator === "is_not") return frag(ref, { [Op.notIn]: sources });
+    }
     if (operator === "is_one_of") {
       const list = toArray(value);
       return list.length ? frag(ref, { [Op.in]: list }) : null;

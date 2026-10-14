@@ -12,7 +12,7 @@ const catalog = require("./fieldCatalog");
 const { normalizePhoneNumber } = require("../../utils/phoneNumber");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const VALID_SOURCE_TYPES = new Set(["movira", "csv", "manual", "form", "api", "webhook", "imported"]);
+const VALID_SOURCE_TYPES = new Set(catalog.CONTACT_ENUMS.sourceType);
 const VALID_MARKETING_STATUSES = new Set(["subscribed", "unsubscribed", "bounced", "complained", "unknown"]);
 const VALID_LIFECYCLES = new Set(["lead", "customer", "member", "guest", "prospect", "inactive", "vip"]);
 const MAX_LIVE_FILTER_CONDITIONS = 20;
@@ -289,7 +289,7 @@ async function findExistingContact(models, payload, identity, transaction) {
   return null;
 }
 
-async function upsertContact(input = {}) {
+async function upsertContact(input = {}, { preserveExistingSource = false } = {}) {
   const models = getModels();
   const locationId = requireLocation(input.locationId);
   const payload = contactPayload(input, locationId);
@@ -316,6 +316,13 @@ async function upsertContact(input = {}) {
         sourceSnapshot: { ...(existing.sourceSnapshot || {}), ...(payload.sourceSnapshot || {}) },
         doNotContact: Boolean(existing.doNotContact || payload.doNotContact),
       };
+      // Delivery events are not acquisition events. Omit these columns entirely
+      // so a concurrent sync cannot be reverted by an older notification read.
+      if (preserveExistingSource) {
+        delete next.sourceType;
+        delete next.sourceRefType;
+        delete next.sourceRefId;
+      }
       contact = await existing.update(next, { transaction, returning: true });
     } else {
       contact = await models.CrmContact.create(payload, { transaction });
@@ -353,7 +360,7 @@ async function listContacts(query = {}) {
   const where = { locationId, communicationOnly: false };
   const q = cleanString(query.search, 120);
 
-  if (query.sourceType) where.sourceType = cleanString(query.sourceType, 40);
+  if (query.sourceType) where.sourceType = query.sourceType === "movira" ? { [Op.in]: ["movira", "booking"] } : cleanString(query.sourceType, 40);
   if (query.marketingStatus) where.marketingStatus = cleanString(query.marketingStatus, 40);
   if (q) {
     const phoneDigits = q.replace(/\D/g, "");
@@ -430,7 +437,7 @@ function mapCoreCustomerToContact(customer = {}, defaults = {}) {
     lastName: customer.lastName,
     email: customer.email,
     phone: customer.phone,
-    sourceType: "movira",
+    sourceType: Number(customer.bookingCount || 0) > 0 || customer.source === "booking" ? "booking" : "movira",
     sourceRefType: "guest",
     sourceRefId: String(customer.id || customer.guestId || ""),
     externalType: "guest",
@@ -448,7 +455,7 @@ function mapCoreCustomerToContact(customer = {}, defaults = {}) {
       locationName: customer.locationName || customer.location?.legalBusinessName || customer.location?.name || customer.venueName || customer.locationSlug || (customer.locationId || defaults.locationId ? `Location ${customer.locationId || defaults.locationId}` : null),
       locationSlug: customer.locationSlug || customer.location?.slug || null,
       locationAddress: customer.locationAddress || customer.location?.displayAddress || null,
-      source: customer.source || "booking",
+      source: customer.source || "movira",
       dateOfBirth: customer.dateOfBirth || customer.dob || customer.guestDateOfBirth || null,
       bookingCount: Number(customer.bookingCount || 0),
       totalSpend: Number(customer.totalSpend || 0),
@@ -571,7 +578,9 @@ async function processMoviraCustomerWebhook(input = {}) {
       }
 
       const mapped = mapCoreCustomerToContact(row, { locationId });
-      const result = await upsertContact({ ...mapped, skipFilterCountInvalidation: true });
+      const result = await upsertContact({ ...mapped, skipFilterCountInvalidation: true }, {
+        preserveExistingSource: mapped.sourceType === "movira",
+      });
       if (result.created) createdCount += 1;
       else updatedCount += 1;
       synced.push(result.contact);
@@ -650,12 +659,13 @@ async function getContactStats(query = {}) {
   const models = getModels();
   const locationId = requireLocation(query.locationId);
   const sourceWhere = query.sourceType ? { locationId, sourceType: cleanString(query.sourceType, 40) } : { locationId };
+  if (query.sourceType === "movira") sourceWhere.sourceType = { [Op.in]: ["movira", "booking"] };
   sourceWhere.communicationOnly = false;
   const [total, subscribed, doNotContact, movira, csv, manual] = await Promise.all([
     models.CrmContact.count({ where: sourceWhere }),
     models.CrmContact.count({ where: { ...sourceWhere, marketingStatus: "subscribed", doNotContact: false } }),
     models.CrmContact.count({ where: { ...sourceWhere, doNotContact: true } }),
-    models.CrmContact.count({ where: { locationId, sourceType: "movira" } }),
+    models.CrmContact.count({ where: { locationId, communicationOnly: false, sourceType: "booking" } }),
     models.CrmContact.count({ where: { locationId, sourceType: "csv" } }),
     models.CrmContact.count({ where: { locationId, sourceType: "manual" } }),
   ]);

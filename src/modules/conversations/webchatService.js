@@ -444,7 +444,7 @@ async function handoff({ widgetKey, sessionToken, origin }) {
 
 async function sessionStatus({ widgetKey, sessionToken, origin }) {
   const { conversation, connection } = await authenticatedSession(widgetKey, sessionToken, origin);
-  return { handlingMode: conversation.handlingMode, settings: settingsFor(connection) };
+  return { handlingMode: conversation.handlingMode, settings: { ...settingsFor(connection), displayName: connection.displayName || "Chat with us" } };
 }
 
 async function leadRequest({ widgetKey, sessionToken, origin, fields, submit = false }) {

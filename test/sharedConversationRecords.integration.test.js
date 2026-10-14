@@ -65,6 +65,24 @@ test('shared records migrate without losing IDs, isolate identities and consent,
     const [{ crm_contact_id: profileId }] = (await s.query(`SELECT crm_contact_id FROM "${schema}".crm_chat_contacts`))[0];
     const [profile] = (await s.query(`SELECT * FROM "${schema}".crm_contacts WHERE id=:id`,{replacements:{id:profileId}}))[0];
     assert.equal(profile.marketingStatus,'unknown'); assert.equal(profile.communicationOnly,true);
+    const correction = require('../migrations/20261014000200-correct-contact-source-attribution');
+    const oldBooking = await models.CrmContact.create({locationId:4,sourceType:'webhook',sourceRefType:'booking',sourceRefId:'test-booking'});
+    const unknown = await models.CrmContact.create({locationId:4,sourceType:'webhook',sourceRefType:'event',customFields:{bookingCount:'invalid',source:'booking'}});
+    const preservedOrigin = oldBooking.originalSource;
+    await correction.up(q);
+    await oldBooking.reload(); await unknown.reload();
+    assert.equal(oldBooking.sourceType,'booking');
+    assert.deepEqual(oldBooking.originalSource,preservedOrigin);
+    assert.deepEqual(oldBooking.sourceHistory.map(row=>row.sourceType),['webhook','booking']);
+    assert.equal(unknown.sourceType,'webhook','the old default customFields.source=booking is not proof of a booking');
+    const correctedChat = await models.CrmContact.findByPk(profileId);
+    assert.equal(correctedChat.sourceType,'webchat');
+    assert.deepEqual(correctedChat.originalSource,profile.originalSource);
+    assert.deepEqual(correctedChat.sourceHistory.map(row=>row.sourceType),['conversation','webchat']);
+    await correction.up(q);
+    await correction.down(q);
+    await oldBooking.reload();
+    assert.equal(oldBooking.sourceHistory.length,2,'reruns and rollback never duplicate or erase source history');
     await s.query(`UPDATE "${legacy}".guest_ai_contacts SET display_name='Legacy updated' WHERE guest_ai_contact_id=7`);
     assert.equal((await s.query(`SELECT display_name FROM "${schema}".crm_chat_contacts WHERE guest_ai_contact_id=7`))[0][0].display_name,'Legacy updated');
     const removeAliases = require('../migrations/20261013000500-remove-legacy-contact-lead-views');
@@ -89,7 +107,7 @@ test('shared records migrate without losing IDs, isolate identities and consent,
     const service = require(path.join(coreRoot, 'services/conversations/contactService'));
     const create = (key, channel, email='same@example.invalid') => service.upsertChatContact({locationId:4,identityKey:key,channel,email,fullName:'Visitor',phone:''});
     const first = await create('identity:website','webchat');
-    assert.equal((await models.CrmContact.findByPk(first.crmContactId)).originalSource.sourceType,'conversation');
+    assert.equal((await models.CrmContact.findByPk(first.crmContactId)).originalSource.sourceType,'webchat');
     assert.equal((await create('identity:website','webchat')).crmContactId, first.crmContactId);
     const other = await create('identity:instagram','instagram');
     assert.notEqual(first.crmContactId,other.crmContactId,'same unverified email never merges identities');
@@ -116,7 +134,7 @@ test('shared records migrate without losing IDs, isolate identities and consent,
     assert.equal(typeof grouped.rows[0].contactId,'string','bigint IDs must retain their existing string format');
     const emailDetail = await inbox.getContact(staff,first.guestAiContactId);
     assert.deepEqual(new Set(emailDetail.sourceProfiles.map(row=>row.id)),new Set([first.crmContactId,other.crmContactId]));
-    assert.ok(emailDetail.sourceProfiles.every(row=>row.originalSource.sourceType==='conversation' && row.sourceHistory.length===1));
+    assert.ok(emailDetail.sourceProfiles.every(row=>row.originalSource.sourceType===row.channels[0] && row.sourceHistory.length===1));
     assert.deepEqual(new Set(emailDetail.sourceProfiles.flatMap(row=>row.channels)),new Set(['webchat','instagram']));
     assert.ok(emailDetail.sourceProfiles.every(row=>!('email' in row) && row.id!==otherPark.crmContactId),'source history exposes only linked same-park attribution');
     assert.deepEqual(new Set(emailDetail.contact.channels),new Set(['instagram','webchat']));
@@ -141,6 +159,7 @@ test('shared records migrate without losing IDs, isolate identities and consent,
     for (const channel of ['facebook','x','linkedin','sms','whatsapp','telegram','email']) {
       const record = await create(`identity:${channel}`,channel,'');
       assert.ok(record.crmContactId); assert.equal(record.normalizedEmail,null);
+      assert.equal((await models.CrmContact.findByPk(record.crmContactId)).originalSource.sourceType,channel);
     }
     assert.equal((await inbox.listContacts(staff,{channel:'facebook'})).count,1,'contacts without email remain separate');
     await assert.rejects(service.conversationContext(conversation.id,5), {status:404});
@@ -199,6 +218,23 @@ test('shared records migrate without losing IDs, isolate identities and consent,
       }
       assert.equal(await models.GuestAiLead.count({where:{crmConversationId:thread.id}}),0,'opening a form is not a submitted lead');
       await assert.rejects(records.leadForm({...input,fields:{email:'invalid'}},true),e=>e.status===400);
+      await assert.rejects(records.leadForm({...input,fields:{...fields,phone:'1234567'}},true),e=>e.status===400 && !!e.details?.fieldErrors?.phone);
+      assert.equal(await models.GuestAiLead.count({where:{crmConversationId:thread.id}}),0,'invalid phone must not create a lead');
+      if (channel === 'webchat') {
+        const legacyDraft = await models.GuestAiLeadSession.findByPk(draft.lead_session_id);
+        const snapshot = {...legacyDraft.configSnapshot, park:{...legacyDraft.configSnapshot.park}};
+        delete snapshot.park.country;
+        await legacyDraft.update({configSnapshot:snapshot,state:'confirm',values:{...fields,phone:'1234567'}});
+        const workflow = require(path.join(coreRoot,'services/guestAi/leadWorkflowService'));
+        await assert.rejects(workflow.submitLeadSession(draft.lead_session_id,{idempotency_key:thread.id,transcript:[]}),e=>e.status===400 && !!e.details?.fieldErrors?.phone);
+        await legacyDraft.reload();
+        assert.equal(legacyDraft.state,'confirm','invalid legacy draft remains editable');
+        const reopened = await records.leadForm(input);
+        assert.equal(reopened.state,'confirm');
+        assert.equal(reopened.form.values.phone,'1234567','reopening preserves the submitted draft for correction');
+        assert.ok(reopened.form.fields.some(field=>field.key==='phone'));
+        assert.ok(reopened.choices.some(choice=>choice.action==='submit'),'legacy chat confirmation actions remain available');
+      }
       const saved = await records.leadForm({...input,fields},true);
       assert.equal(saved.state,'success');
       assert.equal((await records.leadForm({...input,fields},true)).lead_id,saved.lead_id);

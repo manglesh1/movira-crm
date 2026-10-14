@@ -4,7 +4,7 @@
 // fields live inside the customFields JSONB and are described by crm_contact_fields.
 
 const CONTACT_ENUMS = {
-  sourceType: ["movira", "csv", "manual", "form", "api", "webhook", "imported"],
+  sourceType: ["booking", "movira", "csv", "manual", "form", "api", "webhook", "imported", "conversation", "webchat", "guest_ai", "facebook", "instagram", "whatsapp", "sms", "email", "telegram", "x", "linkedin"],
   marketingStatus: ["subscribed", "unsubscribed", "bounced", "complained", "unknown"],
   smsStatus: ["subscribed", "unsubscribed", "unknown"],
   lifecycle: ["lead", "customer", "member", "guest", "prospect", "inactive", "vip"],

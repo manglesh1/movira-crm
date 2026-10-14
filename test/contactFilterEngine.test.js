@@ -4,6 +4,15 @@ const { Op } = require("sequelize");
 const engine = require("../src/modules/contacts/filterEngine");
 const catalog = require("../src/modules/contacts/fieldCatalog");
 
+test("saved Movira filters retain booking customers and explicit channels stay exact", () => {
+  const compile = (operator,value) => engine.compile({match:'all',conditions:[{field:'sourceType',operator,value}]}).sourceType;
+  assert.deepEqual(compile('is','movira')[Op.in],['movira','booking']);
+  assert.deepEqual(compile('is_not','movira')[Op.notIn],['movira','booking']);
+  assert.deepEqual(compile('is_one_of',['movira','csv'])[Op.in],['movira','csv','booking']);
+  assert.equal(compile('is','booking')[Op.eq],'booking');
+  assert.equal(compile('is','instagram')[Op.eq],'instagram');
+});
+
 const CUSTOM_FIELDS = [
   { key: "favourite_park", label: "Favourite park", fieldType: "dropdown", options: ["London", "Windsor"] },
   { key: "lifetime_spend", label: "Lifetime spend", fieldType: "currency" },

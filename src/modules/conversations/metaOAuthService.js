@@ -215,11 +215,26 @@ async function disconnectConnection({ connectionId, locationId }, fetchImpl = fe
     }
   }
   const unsubscribeUnconfirmed = connection.provider === "meta" && !providerUnsubscribed;
-  await connection.update({
+  const disconnectedValues = {
     status: "disconnected", encryptedCredentials: null, capabilities: {}, disconnectedAt: new Date(),
     lastErrorCode: unsubscribeUnconfirmed ? "provider_unsubscribe_unconfirmed" : null,
     lastErrorMessageSafe: unsubscribeUnconfirmed ? "Local access was revoked; provider unsubscribe could not be confirmed." : null,
-  });
+  };
+  if (connection.channel === "webchat") {
+    const models = getModels();
+    await models.sequelize.transaction(async transaction => {
+      // Use the same lock order as message receipt and AI publication.
+      await connection.reload({ transaction, lock: transaction.LOCK.UPDATE });
+      await connection.update({ ...disconnectedValues,
+        widgetSettings: require('./webchatService').settingsFor(connection),
+      }, { transaction });
+      await models.CrmConversation.update({ handlingMode: 'waiting',
+        handlingVersion: models.sequelize.literal('"handlingVersion" + 1'),
+      }, { where: { connectionId: connection.id, locationId, handlingMode: 'ai' }, transaction });
+    });
+  } else {
+    await connection.update(disconnectedValues);
+  }
   return { id: connection.id, status: connection.status, providerUnsubscribed };
 }
 

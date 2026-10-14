@@ -33,6 +33,7 @@ function sendError(res, error) {
     success: false,
     error: error.code || "internal_error",
     message: error.statusCode ? error.message : "Chat is temporarily unavailable.",
+    ...(error.statusCode < 500 && error.details ? { details: error.details } : {}),
   });
 }
 
@@ -56,11 +57,21 @@ router.get("/widget.js", (_req, res) => {
   res.sendFile(path.join(__dirname, "webchatWidget.js"));
 });
 
-router.use("/:widgetKey", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); }, publicRateLimit);
+router.use("/:widgetKey", async (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  res.vary("Origin");
+  try {
+    // Validate the widget's own allow-list before setting CORS, including for
+    // validation, rate-limit and upstream errors. Never reflect arbitrary origins.
+    const origin = requestOrigin(req);
+    await webchat.getPublicConfig(req.params.widgetKey, origin, clientIp(req));
+    if (origin) res.set("Access-Control-Allow-Origin", new URL(origin).origin);
+    next();
+  } catch (error) { sendError(res, error); }
+}, publicRateLimit);
 
 router.options("/:widgetKey/*", async (req, res) => {
   try {
-    await webchat.getPublicConfig(req.params.widgetKey, requestOrigin(req));
     const origin = requestOrigin(req);
     if (origin) res.set("Access-Control-Allow-Origin", new URL(origin).origin);
     res.set({

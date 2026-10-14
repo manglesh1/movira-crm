@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 
 test('CRM uses park/email identity, preserves source history, and never matches automation by phone',
-  { skip: process.env.RUN_SHARED_RECORDS_DB_TEST !== '1' }, async () => {
+  { skip: process.env.RUN_SHARED_RECORDS_DB_TEST !== '1' }, async (t) => {
   require('dotenv').config();
   const schema = `contact_source_test_${randomBytes(6).toString('hex')}`;
   process.env.CRM_DB_SCHEMA = schema;
@@ -15,7 +15,8 @@ test('CRM uses park/email identity, preserves source history, and never matches 
     CrmContactIdentity: require('../src/db/models/CrmContactIdentity')(s),
     CrmContactTag: require('../src/db/models/CrmContactTag')(s),
     CrmContactFilterCount: { update: async () => [0] },
-    CrmAutomationWorkflow: { findAll: async () => [] } };
+    CrmAutomationWorkflow: { findAll: async () => [] },
+    CrmContactImportJob: { create: async row => row }, CrmSegment: { count: async () => 0 } };
   models.CrmContact.removeAttribute('originalSource');
   models.CrmContact.removeAttribute('sourceHistory');
   const migration = require('../migrations/20261013000600-preserve-contact-source-history');
@@ -29,6 +30,7 @@ test('CRM uses park/email identity, preserves source history, and never matches 
     models.CrmContactIdentity.belongsTo(models.CrmContact, {as:'contact',foreignKey:'contactId'});
     require('../src/db/models').getModels = () => models;
     const contacts = require('../src/modules/contacts/service');
+    t.mock.method(require('../src/modules/contactFields/service'), 'ensureSystemFields', async () => {});
     const automation = require('../src/modules/automation/service');
     const historic = await models.CrmContact.findByPk(old.id);
     assert.equal(historic.originalSource.provenance,'legacy_snapshot');
@@ -68,6 +70,45 @@ test('CRM uses park/email identity, preserves source history, and never matches 
     const booking = {...input,email:'booking@example.invalid',sourceType:'movira',provider:'movira',externalType:'guest',externalId:'764',sourceRefType:'guest',sourceRefId:'764'};
     const booked = (await contacts.upsertContact(booking)).contact;
     assert.equal((await contacts.upsertContact({...booking,email:'booking-updated@example.invalid'})).contact.id,booked.id);
+    const sync = async customer => {
+      const result = await contacts.processMoviraCustomerWebhook({locationId:4,customer});
+      assert.equal(result.job.errorCount,0,JSON.stringify(result.job.errors));
+      return result.contacts[0];
+    };
+    const synced = await sync({id:764,email:'booking-updated@example.invalid',bookingCount:1});
+    assert.equal(synced.id,booked.id,'source changes retain the Movira external identity');
+    assert.equal(synced.sourceType,'booking');
+    assert.deepEqual(synced.originalSource,booked.originalSource);
+    assert.equal((await sync({id:764,email:synced.email})).sourceType,'booking','incomplete sync cannot erase booking attribution');
+    assert.equal((await sync({id:765,email:'new-booking@example.invalid',source:'booking'})).originalSource.sourceType,'booking');
+    assert.equal((await sync({id:766,email:'member-only@example.invalid',source:'membership',bookingCount:0})).sourceType,'movira','no invented booking source');
+
+    const notifications = require('../src/modules/notifications/service');
+    t.mock.method(require('../src/modules/notifications/repository'), 'findActiveBinding', async () => ({id:1,templateKey:'bookingConfirmation',variableMap:{}}));
+    t.mock.method(require('../src/modules/transactional/service'), 'enqueueMessage', async () => ({duplicate:false,message:{id:1,status:'queued'}}));
+    t.mock.method(require('../src/modules/queueJobs/service'), 'enqueueAutomationEvents', async () => ({queued:true}));
+    const notify = email => notifications.ingestEvent({eventType:'booking.confirmed',locationId:4,recipient:{email},
+      sourceResourceId:'source-test-booking',idempotencyKey:'source-test-event',
+      payload:{guestName:'Guest',bookingNumber:'TEST',venueName:'Test Park'}});
+    assert.equal((await notify(synced.email)).contactId,booked.id);
+    const afterNotification = await models.CrmContact.findByPk(booked.id);
+    assert.equal(afterNotification.sourceType,'booking');
+    assert.equal(afterNotification.sourceRefType,'guest');
+    assert.deepEqual(afterNotification.sourceHistory,synced.sourceHistory,'delivery does not append a webhook source');
+    assert.equal(afterNotification.customFields.source,'movira','transport does not replace source metadata');
+    // A pre-existing notification identity still wins after the attribution change.
+    assert.equal((await notify('edited-notification@example.invalid')).contactId,booked.id);
+    const newEvent = await notifications.ingestEvent({eventType:'booking.confirmed',locationId:4,recipient:{email:'event-first@example.invalid'},
+      sourceResourceId:'another-booking',idempotencyKey:'another-event',payload:{guestName:'Guest',bookingNumber:'OTHER',venueName:'Test Park'}});
+    const eventContact = await models.CrmContact.findByPk(newEvent.contactId);
+    assert.equal(eventContact.originalSource.sourceType,'booking');
+    assert.equal((await sync({id:767,email:eventContact.email,bookingCount:2})).id,eventContact.id,'event-first then sync reuses same park/email');
+    assert.equal((await contacts.getContactStats({locationId:4})).movira,3,'booking metric excludes membership-only sync');
+    const priorSources = (await models.CrmContact.findByPk(eventContact.id)).sourceHistory;
+    const waiver = await notifications.ingestEvent({eventType:'waiver.completed',locationId:4,recipient:{email:eventContact.email},
+      sourceResourceId:'test-waiver',idempotencyKey:'waiver-event',payload:{guestName:'Guest',venueName:'Test Park'}});
+    assert.equal(waiver.contactId,eventContact.id);
+    assert.deepEqual((await models.CrmContact.findByPk(eventContact.id)).sourceHistory,priorSources,'non-booking delivery cannot overwrite booking source');
     const phoneOnly = await automation.triggerWorkflowsForEvent({locationId:4,eventType:'contact.changed',phone:input.phone});
     assert.equal(phoneOnly.skipped,'contact_not_found');
     const wrongEmail = await automation.triggerWorkflowsForEvent({locationId:4,eventType:'contact.changed',email:'unknown@example.invalid',phone:input.phone});

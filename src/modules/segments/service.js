@@ -68,7 +68,7 @@ function isMoviraCompatibleSegment(segment = {}) {
   }
   const filters = segment.filters || {};
   const sourceTypes = arrayOfStrings(filters.sourceTypes || filters.sourceType);
-  return !sourceTypes.length || sourceTypes.includes("movira");
+  return !sourceTypes.length || sourceTypes.includes("movira") || sourceTypes.includes("booking");
 }
 
 // Delegates to the shared advanced-filter engine. Accepts both the new

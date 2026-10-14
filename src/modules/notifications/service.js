@@ -53,6 +53,8 @@ async function ingestEvent(body) {
 
   const variables = buildVariables(event.payload, binding.variableMap);
   const eventMeta = eventRegistry.getEvent(event.eventType) || {};
+  const bookingSource = event.eventType.startsWith("booking.") || eventMeta.sourceResourceType === "booking"
+    || (["payment", "refund_request"].includes(eventMeta.sourceResourceType) && Boolean(event.payload.bookingNumber));
 
   const transactionalRequest = {
     locationId: event.locationId,
@@ -105,7 +107,9 @@ async function ingestEvent(body) {
       fullName: event.recipient.name || event.payload.guestName || event.payload.customerName,
       email: event.recipient.email,
       phone: event.recipient.phone || event.payload.guestPhone || event.payload.phone,
-      sourceType: "webhook",
+      sourceType: bookingSource ? "booking" : "movira",
+      // Keep existing external identities addressable after changing attribution.
+      provider: "webhook",
       sourceRefType: event.sourceResourceType || eventMeta.sourceResourceType || "event",
       sourceRefId: event.sourceResourceId || event.idempotencyKey,
       externalType: event.sourceResourceType || eventMeta.sourceResourceType || "event",
@@ -113,13 +117,13 @@ async function ingestEvent(body) {
       lifecycle: event.eventType.startsWith("booking.") ? "customer" : "lead",
       tags: event.eventType.startsWith("booking.") ? ["booking-customer"] : [],
       customFields: {
-        source: event.sourceSystem || eventMeta.sourceSystem || "aeroSportsAdmin",
+        lastEventSourceSystem: event.sourceSystem || eventMeta.sourceSystem || "aeroSportsAdmin",
         lastEventType: event.eventType,
         bookingNumber: event.payload.bookingNumber || null,
         venueName: event.payload.venueName || null,
       },
       sourceSnapshot: event.payload,
-    });
+    }, { preserveExistingSource: true });
     contact = contactResult.contact;
     contactCreated = Boolean(contactResult.created);
 
