@@ -279,18 +279,13 @@ async function findExistingContact(models, payload, identity, transaction) {
 
   if (payload.normalizedEmail) {
     const byEmail = await models.CrmContact.findOne({
-      where: { locationId: payload.locationId, normalizedEmail: payload.normalizedEmail },
+      where: { locationId: payload.locationId, normalizedEmail: payload.normalizedEmail, communicationOnly: false },
       transaction,
     });
     if (byEmail) return byEmail;
   }
 
-  if (payload.normalizedPhone) {
-    return models.CrmContact.findOne({
-      where: { locationId: payload.locationId, normalizedPhone: payload.normalizedPhone },
-      transaction,
-    });
-  }
+  // Shared/recycled phone numbers are contact details, never customer identity.
   return null;
 }
 
@@ -321,7 +316,7 @@ async function upsertContact(input = {}) {
         sourceSnapshot: { ...(existing.sourceSnapshot || {}), ...(payload.sourceSnapshot || {}) },
         doNotContact: Boolean(existing.doNotContact || payload.doNotContact),
       };
-      contact = await existing.update(next, { transaction });
+      contact = await existing.update(next, { transaction, returning: true });
     } else {
       contact = await models.CrmContact.create(payload, { transaction });
       created = true;
@@ -355,7 +350,7 @@ async function listContacts(query = {}) {
   const locationId = requireLocation(query.locationId);
   const page = Math.max(1, Number(query.page || 1));
   const pageSize = Math.min(100, Math.max(1, Number(query.pageSize || 25)));
-  const where = { locationId };
+  const where = { locationId, communicationOnly: false };
   const q = cleanString(query.search, 120);
 
   if (query.sourceType) where.sourceType = cleanString(query.sourceType, 40);
@@ -405,6 +400,9 @@ async function updateContact(id, input = {}) {
   const payload = contactPayload({ ...plain(contact), ...input }, locationId);
   const updated = await contact.update({
     ...payload,
+    // Chat identities are not verified customer matching keys. Keep them out
+    // of the unique email/import lookup namespace when staff edit their details.
+    ...(contact.communicationOnly ? { normalizedEmail: null, normalizedPhone: null } : {}),
     tags: normalizeTags(input.tags ?? contact.tags),
     customFields: input.customFields && typeof input.customFields === "object"
       ? { ...(contact.customFields || {}), ...input.customFields }
@@ -412,7 +410,7 @@ async function updateContact(id, input = {}) {
     sourceSnapshot: input.sourceSnapshot && typeof input.sourceSnapshot === "object"
       ? { ...(contact.sourceSnapshot || {}), ...input.sourceSnapshot }
       : contact.sourceSnapshot,
-  });
+  }, { returning: true });
   const data = plain(updated);
   await markContactFilterCountsStale(locationId, "contact_updated");
   return { ...data, tagsAdded: diffTags(previousTags, data.tags) };
@@ -652,6 +650,7 @@ async function getContactStats(query = {}) {
   const models = getModels();
   const locationId = requireLocation(query.locationId);
   const sourceWhere = query.sourceType ? { locationId, sourceType: cleanString(query.sourceType, 40) } : { locationId };
+  sourceWhere.communicationOnly = false;
   const [total, subscribed, doNotContact, movira, csv, manual] = await Promise.all([
     models.CrmContact.count({ where: sourceWhere }),
     models.CrmContact.count({ where: { ...sourceWhere, marketingStatus: "subscribed", doNotContact: false } }),
@@ -685,7 +684,7 @@ function buildSearchScope(models, locationId, { segmentId, filters, search, cust
   const searchFragment = filterEngine.searchFragment(search);
   if (searchFragment) and.push(searchFragment);
 
-  const where = and.length ? { locationId, [Op.and]: and } : { locationId };
+  const where = and.length ? { locationId, communicationOnly: false, [Op.and]: and } : { locationId, communicationOnly: false };
   const include = segmentId
     ? [{
         model: models.CrmSegmentMember,

@@ -32,10 +32,8 @@ router.get("/meta/oauth/callback", async (req, res, next) => {
   }
 });
 
-// Dedicated conversation permissions will replace these compatibility actions
-// after they are added to the core permission registry and admin UI.
 router.use(auth, authorizeLocation({
-  action: (req) => (req.method === "GET" ? "crm:read" : "crm:contacts:write"),
+  action: require('./routePermission'),
   requireLocation: true,
 }));
 
@@ -49,6 +47,7 @@ function sendError(res, error) {
     success: false,
     error: error.code || "internal_error",
     message: error.message || "Internal server error",
+    ...(error.details ? { details: error.details } : {}),
   });
 }
 
@@ -65,6 +64,21 @@ function handler(fn, status = 200) {
 }
 
 router.get("/channels", handler((req) => service.listChannels(req.query)));
+router.get('/assignees', handler(req => require('./assigneeService').listAssignees(req.crmLocationId)));
+router.get("/:id/customer-profile", handler((req) => service.getCustomerProfile(req.params.id, req.query)));
+router.post("/:id/link-contact", handler((req) => require("./guestAiBridge").callCore("link-contact", {
+  locationId: req.crmLocationId, conversationId: req.params.id, targetConversationId: req.body?.targetConversationId,
+  verifiedByStaff: req.body?.verifiedByStaff, reason: req.body?.reason, actorUserId: actorUserId(req),
+})));
+// Every installed channel can use the same follow-up form from the staff inbox.
+router.post("/:id/lead-form", handler((req) => require("./guestAiBridge").callCore("lead-form", {
+  locationId: req.body?.locationId || req.query.locationId, conversationId: req.params.id,
+  createdBy: "staff",
+})));
+router.post("/:id/lead-submit", handler((req) => require("./guestAiBridge").callCore("lead-submit", {
+  locationId: req.body?.locationId || req.query.locationId, conversationId: req.params.id,
+  createdBy: "staff", fields: req.body?.fields,
+})));
 router.post("/channels/webchat", handler((req) => webchatService.configure({
   locationId: req.body?.locationId || req.query.locationId,
   userId: actorUserId(req),
@@ -158,7 +172,9 @@ router.post("/automation-rules", handler((req) => service.createAutomationRule({
 router.patch("/automation-rules/:ruleId", handler((req) => service.updateAutomationRule(req.params.ruleId, { ...req.query, ...(req.body || {}) })));
 router.delete("/automation-rules/:ruleId", handler((req) => service.deleteAutomationRule(req.params.ruleId, req.query)));
 router.get("/analytics", handler((req) => service.getAnalytics(req.query)));
-router.get("/", handler((req) => service.listConversations(req.query)));
+router.get("/", handler((req) => service.listConversations({ ...req.query, actorUserId: actorUserId(req) })));
+router.post("/:id/takeover", handler((req) => require("./webchatOrchestration").takeOver(req.params.id, Number(req.query.locationId), "human", actorUserId(req))));
+router.post("/:id/return-to-ai", handler((req) => require("./webchatOrchestration").returnToAi(req.params.id, Number(req.query.locationId), actorUserId(req))));
 router.get("/:id", handler((req) => service.getConversation(req.params.id, req.query)));
 router.get("/:id/messages", handler((req) => service.listMessages(req.params.id, req.query)));
 router.post("/:id/messages", handler((req) => outboundService.queueReply(

@@ -140,13 +140,18 @@ async function processInboundMessage(models, connection, event, transaction, sen
     }, transaction,
   });
   if (!created) return { type: "duplicate", conversationId: conversation.id, messageId: storedMessage.id };
+  await require('./routingService').routeInbound(models, conversation, message.text, transaction);
+  await models.CrmConversationOutbox.create({
+    locationId: connection.locationId, aggregateType: "conversation", aggregateId: conversation.id,
+    eventType: "conversation.contact.sync", payloadSafe: { conversationId: conversation.id },
+  }, { transaction });
 
   await conversation.update({
     identityId: identity.id, contactId: identity.contactId || conversation.contactId,
     status: ["resolved", "snoozed"].includes(conversation.status) ? "open" : conversation.status,
     lastMessageId: storedMessage.id, lastMessageDirection: "inbound", lastMessageAt: occurredAt,
     lastInboundAt: occurredAt, replyWindowClosesAt: plusHours(occurredAt, 24), snoozedUntil: null,
-    closedAt: null, unreadCount: Number(conversation.unreadCount || 0) + 1,
+    closedAt: conversation.status === 'spam' ? conversation.closedAt : null, unreadCount: Number(conversation.unreadCount || 0) + 1,
   }, { transaction });
   await models.CrmConversationOutbox.create({
     locationId: connection.locationId, aggregateType: "conversation", aggregateId: conversation.id,

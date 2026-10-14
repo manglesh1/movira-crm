@@ -50,8 +50,10 @@ test("location scope accepts only positive integer ids", () => {
 });
 
 test("conversation workspace settings are normalized before persistence", () => {
-  assert.deepEqual(_internal.cleanRouting({ roundRobin: true, firstResponseMinutes: 30, nextResponseMinutes: 240 }), {
-    roundRobin: true,
+  assert.throws(() => _internal.cleanRouting({ roundRobin: true }), { code: 'routing_feature_unavailable' });
+  assert.throws(() => _internal.cleanRouting({ slaEnabled: true }), { code: 'routing_feature_unavailable' });
+  assert.deepEqual(_internal.cleanRouting({ roundRobin: false, firstResponseMinutes: 30, nextResponseMinutes: 240 }), {
+    roundRobin: false,
     skipUnavailable: true,
     fallbackInbox: "Customer care",
     slaEnabled: false,

@@ -107,18 +107,14 @@ function serializeEnrollmentJob(row) {
 async function resolveEventContact(models, locationId, event = {}) {
   if (event.contactId) {
     const contact = await models.CrmContact.findOne({ where: { id: event.contactId, locationId } });
-    if (contact) return contact;
+    if (contact && !contact.communicationOnly) return contact;
   }
   const email = String(event.email || event.recipient?.email || event.payload?.email || event.payload?.guestEmail || "").trim().toLowerCase();
   if (email) {
-    const contact = await models.CrmContact.findOne({ where: { locationId, normalizedEmail: email } });
-    if (contact) return contact;
+    const contact = await models.CrmContact.findOne({ where: { locationId, normalizedEmail: email, communicationOnly: false } });
+    if (contact && !contact.communicationOnly) return contact;
   }
-  const phone = String(event.phone || event.recipient?.phone || event.payload?.phone || event.payload?.guestPhone || "").replace(/[^\d+]/g, "").trim();
-  if (phone) {
-    const contact = await models.CrmContact.findOne({ where: { locationId, normalizedPhone: phone } });
-    if (contact) return contact;
-  }
+  // Phone-only events must not enroll a different person who shares that number.
   return null;
 }
 
@@ -438,10 +434,10 @@ async function loadCustomFields(models, locationId) {
 async function resolveEnrollContacts(models, locationId, input) {
   if (input.contactId) {
     const contact = await models.CrmContact.findOne({ where: { id: input.contactId, locationId } });
-    return contact ? [contact] : [];
+    return contact && !contact.communicationOnly ? [contact] : [];
   }
   if (Array.isArray(input.ids) && input.ids.length) {
-    return models.CrmContact.findAll({ where: { locationId, id: { [Op.in]: input.ids.slice(0, 2000) } } });
+    return models.CrmContact.findAll({ where: { locationId, communicationOnly: false, id: { [Op.in]: input.ids.slice(0, 2000) } } });
   }
   const and = [];
   if (input.filters) {
@@ -455,12 +451,12 @@ async function resolveEnrollContacts(models, locationId, input) {
     ? [{ model: models.CrmSegmentMember, as: "segmentMemberships", where: { segmentId: input.segmentId, status: "active" }, attributes: [], required: true }]
     : [];
   if (!and.length && !input.segmentId && !input.allowAll) return [];
-  const where = and.length ? { locationId, [Op.and]: and } : { locationId };
+  const where = and.length ? { locationId, communicationOnly: false, [Op.and]: and } : { locationId, communicationOnly: false };
   return models.CrmContact.findAll({ where, include, limit: 2000 });
 }
 
 async function buildEnrollmentScope(models, locationId, selection = {}) {
-  if (selection.contactId) return { where: { locationId, id: selection.contactId }, include: [] };
+  if (selection.contactId) return { where: { locationId, communicationOnly: false, id: selection.contactId }, include: [] };
   const and = [];
   const ids = Array.isArray(selection.ids) ? selection.ids.filter(Boolean) : [];
   if (ids.length) and.push({ id: { [Op.in]: ids } });
@@ -475,7 +471,7 @@ async function buildEnrollmentScope(models, locationId, selection = {}) {
     ? [{ model: models.CrmSegmentMember, as: "segmentMemberships", where: { segmentId: selection.segmentId, status: "active" }, attributes: [], required: true }]
     : [];
   if (!and.length && !include.length && !selection.allowAll) throw badRequest("Choose contacts, a segment, filters, search, or allowAll before enrolling");
-  return { where: and.length ? { locationId, [Op.and]: and } : { locationId }, include };
+  return { where: and.length ? { locationId, communicationOnly: false, [Op.and]: and } : { locationId, communicationOnly: false }, include };
 }
 
 async function createAutomationEnrollmentJob(workflow, input = {}) {

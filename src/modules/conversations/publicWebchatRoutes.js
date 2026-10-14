@@ -1,13 +1,14 @@
 const express = require("express");
 const path = require("path");
 const webchat = require("./webchatService");
+const { clientIp } = require("./webchatSecurity");
 
 const router = express.Router();
 const rateBuckets = new Map();
 
 function publicRateLimit(req, res, next) {
   const now = Date.now();
-  const key = `${req.ip}:${req.params.widgetKey || "asset"}`;
+  const key = `${clientIp(req)}:${req.params.widgetKey || "asset"}`;
   const bucket = rateBuckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
     rateBuckets.set(key, { count: 1, resetAt: now + 60_000 });
@@ -55,7 +56,7 @@ router.get("/widget.js", (_req, res) => {
   res.sendFile(path.join(__dirname, "webchatWidget.js"));
 });
 
-router.use("/:widgetKey", publicRateLimit);
+router.use("/:widgetKey", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); }, publicRateLimit);
 
 router.options("/:widgetKey/*", async (req, res) => {
   try {
@@ -74,18 +75,26 @@ router.options("/:widgetKey/*", async (req, res) => {
   }
 });
 
-router.get("/:widgetKey/config", publicHandler((req) => webchat.getPublicConfig(req.params.widgetKey, requestOrigin(req))));
+router.get("/:widgetKey/config", publicHandler((req) => webchat.getPublicConfig(req.params.widgetKey, requestOrigin(req), clientIp(req))));
+const sessionInput = (req) => ({ widgetKey: req.params.widgetKey, origin: requestOrigin(req), sessionToken: req.get("X-Session-Token") });
+router.get("/:widgetKey/session", publicHandler((req) => webchat.sessionStatus(sessionInput(req))));
+router.post("/:widgetKey/handoff", publicHandler((req) => webchat.handoff(sessionInput(req))));
+router.get("/:widgetKey/lead", publicHandler((req) => webchat.leadRequest(sessionInput(req))));
+router.post("/:widgetKey/lead", publicHandler((req) => webchat.leadRequest({ ...sessionInput(req), fields: req.body?.fields, submit: true })));
 router.post("/:widgetKey/sessions", publicHandler((req) => webchat.startSession({
   widgetKey: req.params.widgetKey,
   origin: requestOrigin(req),
   visitor: req.body?.visitor,
+  clientIp: clientIp(req),
   sessionToken: req.body?.sessionToken,
+  challenge: req.body?.challenge, company: req.body?.company,
 }), 201));
 router.get("/:widgetKey/messages", publicHandler((req) => webchat.listVisitorMessages({
   widgetKey: req.params.widgetKey,
   origin: requestOrigin(req),
   sessionToken: req.get("X-Session-Token"),
   after: req.query.after,
+  afterId: req.query.afterId,
 })));
 router.post("/:widgetKey/messages", publicHandler((req) => webchat.addVisitorMessage({
   widgetKey: req.params.widgetKey,
