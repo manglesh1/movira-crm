@@ -1,4 +1,4 @@
-const { Op } = require("sequelize");
+const { Op, literal, where: sqlWhere } = require("sequelize");
 const { getModels } = require("../../db/models");
 const config = require("../../config");
 const webchatService = require("./webchatService");
@@ -9,7 +9,7 @@ const CHANNEL_CATALOG = [
   { channel: "facebook", label: "Facebook Messenger", availability: "available", provider: "meta" },
   { channel: "instagram", label: "Instagram Direct", availability: "available", provider: "meta" },
   { channel: "whatsapp", label: "WhatsApp", availability: "planned", provider: "meta" },
-  { channel: "webchat", label: "Website Chat", availability: "available", provider: "movira" },
+  { channel: "webchat", label: "Website Chat + Guest AI", availability: "available", provider: "movira" },
   { channel: "sms", label: "SMS", availability: "planned", provider: null },
   { channel: "email", label: "Email replies", availability: "available", provider: "movira", connectable: false },
   { channel: "telegram", label: "Telegram", availability: "planned", provider: "telegram" },
@@ -45,7 +45,7 @@ function decodeCursor(value) {
   if (!value) return null;
   try {
     const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"));
-    if (!parsed.id || !parsed.at || Number.isNaN(Date.parse(parsed.at))) throw new Error("bad cursor");
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(parsed.id || '') || !parsed.at || Number.isNaN(Date.parse(parsed.at))) throw new Error("bad cursor");
     return { id: String(parsed.id), at: new Date(parsed.at) };
   } catch {
     throw serviceError("cursor is invalid.", 400, "invalid_cursor");
@@ -58,11 +58,12 @@ function conversationCapabilities(conversation, connection, now = new Date()) {
   const replyWindowOpen = !closesAt || closesAt.getTime() > now.getTime();
   const providerCanReply = connection?.capabilities?.sendMessages === true;
   let replyBlockedReason = null;
-  if (!connected) replyBlockedReason = "channel_not_connected";
+  if (conversation.status === 'spam') replyBlockedReason = 'conversation_blocked';
+  else if (!connected) replyBlockedReason = "channel_not_connected";
   else if (!providerCanReply) replyBlockedReason = "provider_send_not_supported";
   else if (!replyWindowOpen) replyBlockedReason = "reply_window_closed";
   return {
-    canReply: connected && providerCanReply && replyWindowOpen,
+    canReply: connected && providerCanReply && replyWindowOpen && conversation.status !== 'spam',
     replyBlockedReason,
     replyWindowClosesAt: closesAt?.toISOString() || null,
     canAddInternalNote: true,
@@ -132,16 +133,35 @@ async function listConversations(input) {
     if (!PRIORITIES.has(input.priority)) throw serviceError("priority is invalid.");
     where.priority = input.priority;
   }
-  if (cursor) {
-    where[Op.or] = [
-      { lastMessageAt: { [Op.lt]: cursor.at } },
-      { lastMessageAt: cursor.at, id: { [Op.lt]: cursor.id } },
-    ];
+  const conditions = [];
+  if (input.handlingMode) where.handlingMode = String(input.handlingMode);
+  if (input.view === 'mine') { where.assignedUserId = Number(input.actorUserId) || 0; conditions.push({ status: { [Op.notIn]: ['resolved', 'spam'] } }); }
+  if (input.view === 'unassigned') { where.assignedUserId = null; conditions.push({ status: { [Op.notIn]: ['resolved', 'spam'] } }); }
+  if (['sales', 'support'].includes(input.view)) { where.assignedTeamId = input.view === 'sales' ? 'Sales' : 'Support'; conditions.push({ status: { [Op.notIn]: ['resolved', 'spam'] } }); }
+  if (STATUSES.has(input.view)) where.status = input.view;
+  if (String(input.search || '').trim()) {
+    const pattern = `%${String(input.search).trim().slice(0, 200).replace(/[\\%_]/g, '\\$&')}%`;
+    const quote = models.sequelize.getQueryInterface().queryGenerator;
+    const messages = quote.quoteTable(models.CrmConversationMessage.getTableName());
+    const identities = quote.quoteTable(models.CrmConversationIdentity.getTableName());
+    const contacts = quote.quoteTable(models.CrmContact.getTableName());
+    const term = models.sequelize.escape(pattern);
+    conditions.push(literal(`("CrmConversation"."metadataSafe"->'visitor')::text ILIKE ${term}
+      OR "CrmConversation"."subject" ILIKE ${term}
+      OR EXISTS (SELECT 1 FROM ${messages} m WHERE m."conversationId" = "CrmConversation".id AND m."locationId" = "CrmConversation"."locationId" AND m."textBody" ILIKE ${term})
+      OR EXISTS (SELECT 1 FROM ${identities} i WHERE i.id = "CrmConversation"."identityId" AND i."locationId" = "CrmConversation"."locationId" AND (i."displayName" ILIKE ${term} OR i."profileMetadataSafe"::text ILIKE ${term}))
+      OR EXISTS (SELECT 1 FROM ${contacts} c WHERE c.id = "CrmConversation"."contactId" AND c."locationId" = "CrmConversation"."locationId" AND (c.email ILIKE ${term} OR c."fullName" ILIKE ${term} OR c.phone ILIKE ${term}))`));
   }
+  const activity = literal('COALESCE("CrmConversation"."lastMessageAt", "CrmConversation"."createdAt")');
+  const total = await models.CrmConversation.count({ where: { ...where, ...(conditions.length ? { [Op.and]: conditions } : {}) } });
+  if (cursor) {
+    conditions.push({ [Op.or]: [sqlWhere(activity, { [Op.lt]: cursor.at }), { [Op.and]: [sqlWhere(activity, cursor.at), { id: { [Op.lt]: cursor.id } }] }] });
+  }
+  if (conditions.length) where[Op.and] = conditions;
   const rows = await models.CrmConversation.findAll({
     where,
     include: conversationIncludes(models),
-    order: [["lastMessageAt", "DESC NULLS LAST"], ["id", "DESC"]],
+    order: [[activity, "DESC"], ["id", "DESC"]],
     limit: limit + 1,
     distinct: true,
   });
@@ -155,13 +175,25 @@ async function listConversations(input) {
     })
     : [];
   const lastMessageById = new Map(lastMessages.map((message) => [message.id, message.toJSON()]));
+  const quoteTable = models.sequelize.getQueryInterface().queryGenerator.quoteTable(models.CrmConversation.getTableName());
+  const [countRows] = await models.sequelize.query(`SELECT count(*)::int AS all,
+    count(*) FILTER (WHERE "assignedUserId" = :actor AND status NOT IN ('resolved','spam'))::int AS mine,
+    count(*) FILTER (WHERE "assignedUserId" IS NULL AND status NOT IN ('resolved','spam'))::int AS unassigned,
+    count(*) FILTER (WHERE status = 'open')::int AS open,
+    count(*) FILTER (WHERE status = 'pending')::int AS pending,
+    count(*) FILTER (WHERE status = 'resolved')::int AS resolved,
+    count(*) FILTER (WHERE "assignedTeamId" = 'Sales' AND status NOT IN ('resolved','spam'))::int AS sales,
+    count(*) FILTER (WHERE "assignedTeamId" = 'Support' AND status NOT IN ('resolved','spam'))::int AS support
+    FROM ${quoteTable} WHERE "locationId" = :location`, { replacements: { location: id, actor: Number(input.actorUserId) || 0 } });
   return {
+    counts: countRows[0],
     items: page.map((row) => {
       const value = row.toJSON();
       value.lastMessage = lastMessageById.get(value.lastMessageId) || null;
       value.capabilities = conversationCapabilities(value, value.connection);
       return value;
     }),
+    total,
     pageInfo: { hasMore, nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null },
   };
 }
@@ -185,19 +217,31 @@ async function getConversation(id, input) {
   return value;
 }
 
+async function getCustomerProfile(id, input) {
+  const row = await findConversation(id, input.locationId);
+  const email = row.contact?.email || row.identity?.profileMetadataSafe?.email || row.metadataSafe?.visitor?.email;
+  const core = await require('./guestAiBridge').callCore('customer-profile', { locationId: row.locationId, email, conversationId: row.id });
+  return { ...core, contactId: row.contactId || null, emailVerified: row.metadataSafe?.emailVerified === true,
+    emailVerifiedAt: row.metadataSafe?.emailVerifiedAt || null };
+}
+
 async function listMessages(conversationId, input) {
   const id = locationId(input.locationId);
   await findConversation(conversationId, id, { include: false });
   const limit = positiveInt(input.limit, 50, 100);
   const before = input.before ? new Date(input.before) : null;
+  const cursor = decodeCursor(input.cursor);
   if (before && Number.isNaN(before.getTime())) throw serviceError("before is invalid.");
   const { CrmConversationMessage } = getModels();
   const where = { locationId: id, conversationId };
-  if (before) where.occurredAt = { [Op.lt]: before };
+  if (cursor) where[Op.or] = [{ occurredAt: { [Op.lt]: cursor.at } }, { occurredAt: cursor.at, id: { [Op.lt]: cursor.id } }];
+  else if (before) where.occurredAt = { [Op.lt]: before };
   const rows = await CrmConversationMessage.findAll({ where, order: [["occurredAt", "DESC"], ["id", "DESC"]], limit: limit + 1 });
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  return { items: page.reverse(), pageInfo: { hasMore, nextBefore: hasMore ? page[page.length - 1].occurredAt : null } };
+  const oldest = page.at(-1);
+  return { items: [...page].reverse(), pageInfo: { hasMore, nextBefore: hasMore ? oldest.occurredAt : null,
+    nextCursor: hasMore ? encodeCursor({ id: oldest.id, lastMessageAt: oldest.occurredAt }) : null } };
 }
 
 async function addInternalNote(conversationId, input, actorUserId) {
@@ -209,7 +253,7 @@ async function addInternalNote(conversationId, input, actorUserId) {
   return models.sequelize.transaction(async (transaction) => {
     const conversation = await findConversation(conversationId, id, { include: false, transaction, lock: transaction.LOCK.UPDATE });
     const message = await models.CrmConversationMessage.create({
-      locationId: id, conversationId, connectionId: conversation.connectionId, direction: "internal",
+      locationId: id, conversationId, connectionId: conversation.connectionId, direction: "internal", authorType: "staff",
       messageType: "note", textBody, status: "recorded", sentByUserId: actorUserId || null,
       occurredAt: new Date(), metadataSafe: { mentions: Array.isArray(input.mentions) ? input.mentions.slice(0, 50) : [] },
     }, { transaction });
@@ -223,13 +267,17 @@ async function addInternalNote(conversationId, input, actorUserId) {
 
 async function updateAssignment(conversationId, input, actorUserId) {
   const id = locationId(input.locationId);
+  await require('./assigneeService').validateAssignee(id, input.assignedUserId);
   const models = getModels();
   return models.sequelize.transaction(async (transaction) => {
     const row = await findConversation(conversationId, id, { include: false, transaction, lock: transaction.LOCK.UPDATE });
     const previous = { teamId: row.assignedTeamId, userId: row.assignedUserId };
     const toUserId = input.assignedUserId === null ? null : (input.assignedUserId ? positiveInt(input.assignedUserId, 0, Number.MAX_SAFE_INTEGER) : row.assignedUserId);
     const toTeamId = input.assignedTeamId === null ? null : (input.assignedTeamId === undefined ? row.assignedTeamId : String(input.assignedTeamId).trim() || null);
-    await row.update({ assignedUserId: toUserId || null, assignedTeamId: toTeamId }, { transaction });
+    const assigningStaff = input.assignedUserId != null && Boolean(toUserId);
+    await row.update({ assignedUserId: toUserId || null, assignedTeamId: toTeamId,
+      ...(assigningStaff ? { handlingMode: "human", handlingVersion: row.handlingVersion + 1 } : {}),
+    }, { transaction });
     await models.CrmConversationAssignment.create({
       locationId: id, conversationId, fromTeamId: previous.teamId, fromUserId: previous.userId,
       toTeamId, toUserId: toUserId || null, assignedByUserId: actorUserId || null,
@@ -255,7 +303,9 @@ async function updateStatus(conversationId, input) {
   const models = getModels();
   return models.sequelize.transaction(async (transaction) => {
     const row = await findConversation(conversationId, id, { include: false, transaction, lock: transaction.LOCK.UPDATE });
-    await row.update({ status, snoozedUntil, closedAt: ["resolved", "spam"].includes(status) ? new Date() : null }, { transaction });
+    await row.update({ status, snoozedUntil, closedAt: ["resolved", "spam"].includes(status) ? new Date() : null,
+      ...(status !== 'open' ? { handlingVersion: row.handlingVersion + 1 } : {}),
+    }, { transaction });
     await models.CrmConversationOutbox.create({
       locationId: id, aggregateType: "conversation", aggregateId: conversationId,
       eventType: "conversation.status.changed", payloadSafe: { conversationId, status, snoozedUntil },
@@ -297,6 +347,7 @@ function requiredText(value, field, max) {
 }
 
 function cleanRouting(input = {}) {
+  if (input.roundRobin === true || input.slaEnabled === true) throw serviceError('Automatic staff distribution and SLA timers are not available yet.', 409, 'routing_feature_unavailable');
   const positiveChoice = (value, fallback, choices) => choices.includes(Number(value)) ? Number(value) : fallback;
   return {
     roundRobin: input.roundRobin === true, skipUnavailable: input.skipUnavailable !== false,
@@ -349,6 +400,7 @@ async function listRoutingRules(input) {
 }
 
 function routingRuleValues(input, actorUserId) {
+  if (input.active !== false && !require('./routingService').parseCondition(input.condition)) throw serviceError('Use New conversation or Message contains <phrase> for an active routing rule.');
   const priority = String(input.priority || "normal").toLowerCase();
   if (!PRIORITIES.has(priority)) throw serviceError("priority is invalid.");
   return {
@@ -411,6 +463,7 @@ async function listAutomationRules(input) {
 }
 
 function automationRuleValues(input, actorUserId) {
+  if (input.active === true) throw serviceError('Conversation automations can be saved as drafts; execution is not available yet.', 409, 'automation_unavailable');
   return {
     name: requiredText(input.name, "name", 180), trigger: requiredText(input.trigger, "trigger", 255),
     action: requiredText(input.action, "action", 255), active: input.active === true,
@@ -504,7 +557,7 @@ async function getAnalytics(input) {
 }
 
 module.exports = {
-  listChannels, listConversations, getConversation, listMessages, addInternalNote, updateAssignment, updateStatus, markRead,
+  listChannels, listConversations, getConversation, getCustomerProfile, listMessages, addInternalNote, updateAssignment, updateStatus, markRead,
   getWorkspace, updateWorkspace, listRoutingRules, createRoutingRule, updateRoutingRule, deleteRoutingRule,
   listSavedReplies, createSavedReply, updateSavedReply, deleteSavedReply,
   listAutomationRules, createAutomationRule, updateAutomationRule, deleteAutomationRule, getAnalytics,

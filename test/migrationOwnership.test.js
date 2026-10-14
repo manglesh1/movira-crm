@@ -20,7 +20,7 @@ test("CRM baseline adoption is frozen to the migrations that built it", () => {
   const files = fs.readdirSync(path.join(root, "migrations"))
     .filter((name) => name.endsWith(".js"))
     .sort();
-  assert.deepEqual(BASELINE_MIGRATIONS, files);
+  assert.deepEqual(BASELINE_MIGRATIONS, files.filter((name) => name <= "20261004000100-create-crm-conversation-workspace.js"));
 });
 
 test("deploy workflow runs the guarded CRM migration command", () => {

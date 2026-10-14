@@ -64,7 +64,6 @@ const BASELINE_MIGRATIONS = Object.freeze([
   "20261002000700-encrypt-email-provider-configs.js",
   "20261002000800-create-crm-rss-campaigns.js",
   "20261004000100-create-crm-conversation-workspace.js",
-  "20261014000100-enforce-unique-automation-workflow-names.js",
 ]);
 
 const REQUIRED_TABLES = Object.freeze([

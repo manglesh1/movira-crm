@@ -11,6 +11,7 @@ function defineConversationModels(sequelize) {
     externalAccountId: { type: DataTypes.STRING(255), allowNull: false }, displayName: DataTypes.STRING(255),
     status: { type: DataTypes.STRING(40), allowNull: false, defaultValue: "connecting" },
     encryptedCredentials: DataTypes.TEXT, grantedScopes: jsonArray(), capabilities: jsonObject(),
+    widgetSettings: DataTypes.JSONB,
     tokenExpiresAt: DataTypes.DATE, lastWebhookAt: DataTypes.DATE, lastHealthCheckAt: DataTypes.DATE,
     lastErrorCode: DataTypes.STRING(100), lastErrorMessageSafe: DataTypes.TEXT,
     connectedByUserId: DataTypes.INTEGER, disconnectedAt: DataTypes.DATE,
@@ -36,12 +37,15 @@ function defineConversationModels(sequelize) {
     lastOutboundAt: DataTypes.DATE, unreadCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     dueAt: DataTypes.DATE, snoozedUntil: DataTypes.DATE, replyWindowClosesAt: DataTypes.DATE, closedAt: DataTypes.DATE,
     metadataSafe: jsonObject(), version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    handlingMode: { type: DataTypes.STRING(24), allowNull: false, defaultValue: "human" },
+    handlingVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   }, { tableName: "crm_conversations", timestamps: true, version: "version" });
 
   const CrmConversationMessage = sequelize.define("CrmConversationMessage", {
     id: uuid(), locationId: { type: DataTypes.INTEGER, allowNull: false }, conversationId: { type: DataTypes.UUID, allowNull: false },
     connectionId: { type: DataTypes.UUID, allowNull: false }, senderIdentityId: DataTypes.UUID,
     direction: { type: DataTypes.STRING(20), allowNull: false }, messageType: { type: DataTypes.STRING(40), allowNull: false, defaultValue: "text" },
+    authorType: { type: DataTypes.STRING(24), allowNull: false, defaultValue: "visitor" },
     textBody: DataTypes.TEXT, attachments: jsonArray(), providerMessageId: DataTypes.STRING(255), idempotencyKey: DataTypes.STRING(255),
     status: { type: DataTypes.STRING(30), allowNull: false, defaultValue: "received" }, failureCode: DataTypes.STRING(100),
     failureMessageSafe: DataTypes.TEXT, sentByUserId: DataTypes.INTEGER,

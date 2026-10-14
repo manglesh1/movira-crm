@@ -176,6 +176,19 @@ test("fixed date ranges include the full end date and after starts next day", ()
   assert.equal(after.createdAt[Op.gte].getMonth(), 9);
 });
 
+test('calendar date boundaries survive UTC, positive offsets and daylight-saving offsets', () => {
+  const { spawnSync } = require('node:child_process');
+  const script = `const e=require(${JSON.stringify(require.resolve('../src/modules/contacts/filterEngine'))});const {Op}=require('sequelize');
+    const r=e.compile({conditions:[{field:'createdAt',operator:'on',value:'2026-03-08'}]});
+    require('node:assert/strict').equal(r.createdAt[Op.gte].getDate(),8);
+    require('node:assert/strict').equal(r.createdAt[Op.lt].getDate(),9);
+    require('node:assert/strict').deepEqual(e.compile({conditions:[{field:'createdAt',operator:'on',value:'2026-02-30'}]}),{});`;
+  for (const TZ of ['UTC','America/Halifax','America/Los_Angeles','Asia/Kolkata']) {
+    const result=spawnSync(process.execPath,['-e',script],{env:{...process.env,TZ},encoding:'utf8'});
+    assert.equal(result.status,0,`${TZ}: ${result.stderr}`);
+  }
+});
+
 test("day-of-month and relative windows reject invalid values", () => {
   const customFields = [{ key: "dateOfBirth", label: "Date of birth", fieldType: "date" }];
   assert.deepEqual(

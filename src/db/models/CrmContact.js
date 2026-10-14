@@ -10,6 +10,7 @@ function defineCrmContact(sequelize) {
         primaryKey: true,
       },
       locationId: { type: DataTypes.INTEGER, allowNull: false },
+      communicationOnly: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       fullName: { type: DataTypes.STRING(240), allowNull: true },
       firstName: { type: DataTypes.STRING(120), allowNull: true },
       lastName: { type: DataTypes.STRING(120), allowNull: true },
@@ -24,6 +25,9 @@ function defineCrmContact(sequelize) {
       },
       sourceRefType: { type: DataTypes.STRING(80), allowNull: true },
       sourceRefId: { type: DataTypes.STRING(120), allowNull: true },
+      // Maintained by the database for API, imports and direct chat-service writes.
+      originalSource: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      sourceHistory: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
       lifecycle: {
         type: DataTypes.STRING(40),
         allowNull: false,

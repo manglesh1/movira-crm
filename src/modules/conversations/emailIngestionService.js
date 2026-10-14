@@ -58,25 +58,27 @@ async function ingest(input = {}) {
     const [identity] = await models.CrmConversationIdentity.findOrCreate({
       where: { connectionId: connection.id, externalUserId: fromEmail },
       defaults: {
-        locationId, contactId: contact?.id || null, channel: "email", handle: fromEmail,
-        displayName: String(input.from?.name || input.senderName || contact?.fullName || fromEmail).slice(0, 255),
-        matchMethod: contact ? "email_exact" : "unmatched", matchConfidence: contact ? 1 : 0,
-        linkedAt: contact ? new Date() : null, lastSeenAt: occurredAt,
+        locationId, contactId: null, channel: "email", handle: fromEmail,
+        displayName: String(input.from?.name || input.senderName || fromEmail).slice(0, 255),
+        matchMethod: "email_unverified", matchConfidence: 0,
+        profileMetadataSafe: { email: fromEmail, candidateContactId: contact?.id || null },
+        lastSeenAt: occurredAt,
       },
       transaction,
     });
-    await identity.update({ contactId: contact?.id || identity.contactId, lastSeenAt: occurredAt }, { transaction });
+    await identity.update({ lastSeenAt: occurredAt }, { transaction });
 
     const externalThreadId = threadKey(input, fromEmail);
     const [conversation] = await models.CrmConversation.findOrCreate({
       where: { connectionId: connection.id, externalThreadId },
       defaults: {
-        locationId, identityId: identity.id, contactId: contact?.id || null, channel: "email", status: "open",
+        locationId, identityId: identity.id, contactId: identity.contactId || null, channel: "email", status: "open",
         subject: String(input.subject || "Email conversation").slice(0, 500), lastMessageAt: occurredAt,
         lastInboundAt: occurredAt, unreadCount: 0, metadataSafe: { recipient: toEmail, recipientEmail: fromEmail },
       },
       transaction,
     });
+    await require('./routingService').routeInbound(models, conversation, textBody, transaction);
     const message = await models.CrmConversationMessage.create({
       locationId, conversationId: conversation.id, connectionId: connection.id, senderIdentityId: identity.id,
       direction: "inbound", messageType: input.html && !textBody ? "html" : "text", textBody: textBody || stripHtml(input.html),
@@ -84,19 +86,22 @@ async function ingest(input = {}) {
       metadataSafe: { subject: String(input.subject || "").slice(0, 500), hasHtml: Boolean(input.html) },
     }, { transaction });
     await conversation.update({
-      identityId: identity.id, contactId: contact?.id || conversation.contactId, status: "open", closedAt: null,
+      identityId: identity.id, contactId: identity.contactId || conversation.contactId,
+      status: conversation.status === 'spam' ? 'spam' : 'open', closedAt: conversation.status === 'spam' ? conversation.closedAt : null,
       subject: String(input.subject || conversation.subject || "Email conversation").slice(0, 500),
       lastMessageId: message.id, lastMessageDirection: "inbound", lastMessageAt: occurredAt, lastInboundAt: occurredAt,
       unreadCount: Number(conversation.unreadCount || 0) + 1,
       metadataSafe: { ...(conversation.metadataSafe || {}), recipient: toEmail, recipientEmail: fromEmail },
     }, { transaction });
     await models.CrmConversationMessageEvent.create({ locationId, messageId: message.id, eventType: "received", occurredAt, metadataSafe: {} }, { transaction });
+    await models.CrmConversationOutbox.create({ locationId, aggregateType: "conversation", aggregateId: conversation.id,
+      eventType: "conversation.contact.sync", payloadSafe: { conversationId: conversation.id } }, { transaction });
     await models.CrmConversationOutbox.create({
       locationId, aggregateType: "conversation_message", aggregateId: message.id,
       eventType: "conversation.message.received", payloadSafe: { conversationId: conversation.id, messageId: message.id, channel: "email" },
       status: "completed", processedAt: new Date(),
     }, { transaction });
-    return { duplicate: false, messageId: message.id, conversationId: conversation.id, contactId: contact?.id || null };
+    return { duplicate: false, messageId: message.id, conversationId: conversation.id, contactId: identity.contactId || null };
   });
 }
 

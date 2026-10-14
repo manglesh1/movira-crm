@@ -76,7 +76,7 @@ function isMoviraCompatibleSegment(segment = {}) {
 // scoped to the location.
 function buildContactWhere(locationId, filters = {}, customFields = []) {
   const compiled = filterEngine.compile(filters, { customFields });
-  return Object.keys(compiled).length ? { locationId, [Op.and]: [compiled] } : { locationId };
+  return Object.keys(compiled).length ? { locationId, communicationOnly: false, [Op.and]: [compiled] } : { locationId, communicationOnly: false };
 }
 
 async function evaluateSegmentFilters({ locationId, filters = {}, page = 1, pageSize = 25 } = {}) {

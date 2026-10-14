@@ -2,8 +2,15 @@ const crypto = require("crypto");
 const { Op } = require("sequelize");
 const { getModels } = require("../../db/models");
 const { encryptJson, decryptJson } = require("../../shared/credentialVault");
+const { callCore } = require("./guestAiBridge");
+const security = require("./webchatSecurity");
 
 const DEFAULT_SETTINGS = Object.freeze({
+  enabled: true,
+  aiEnabled: false,
+  assistantName: "Guest AI",
+  team: "Customer care",
+  offlineMessage: "Your message is in our team's inbox. You can also leave a follow-up request.",
   greeting: "Hi! How can we help?",
   introText: "Start a conversation with our team.",
   launcherLabel: "Chat with us",
@@ -71,6 +78,11 @@ function normalizeSettings(input = {}) {
   const emailField = normalizeFieldMode(input.emailField, input.collectEmail, DEFAULT_SETTINGS.emailField);
   const phoneField = normalizeFieldMode(input.phoneField, input.collectPhone, DEFAULT_SETTINGS.phoneField);
   return {
+    enabled: input.enabled !== false,
+    aiEnabled: input.aiEnabled === true,
+    assistantName: cleanText(input.assistantName, 40, DEFAULT_SETTINGS.assistantName),
+    team: cleanText(input.team, 120, DEFAULT_SETTINGS.team),
+    offlineMessage: cleanText(input.offlineMessage, 500, DEFAULT_SETTINGS.offlineMessage),
     greeting: cleanText(input.greeting, 160, DEFAULT_SETTINGS.greeting),
     introText: cleanText(input.introText, 160, DEFAULT_SETTINGS.introText),
     launcherLabel: cleanText(input.launcherLabel, 40, DEFAULT_SETTINGS.launcherLabel),
@@ -113,6 +125,7 @@ function encryptSettings(input) {
 }
 
 function settingsFor(connection) {
+  if (connection?.widgetSettings) return normalizeSettings(connection.widgetSettings);
   if (!connection?.encryptedCredentials) return { ...DEFAULT_SETTINGS };
   try {
     return normalizeSettings(decryptJson(connection.encryptedCredentials).settings || {});
@@ -139,8 +152,10 @@ function publicConnection(connection) {
 async function configure({ locationId, userId, settings = {}, displayName }) {
   const id = requiredLocationId(locationId);
   const models = getModels();
+  const widgetSettings = requiredSettings(settings);
+  if (widgetSettings.aiEnabled) await callCore("context", { locationId: id, requireAi: true });
   let connection = await models.CrmConversationChannelConnection.findOne({
-    where: { locationId: id, channel: "webchat", provider: "movira", status: { [Op.ne]: "disconnected" } },
+    where: { locationId: id, channel: "webchat", provider: "movira" },
     order: [["createdAt", "DESC"]],
   });
   const values = {
@@ -149,7 +164,7 @@ async function configure({ locationId, userId, settings = {}, displayName }) {
     provider: "movira",
     displayName: cleanText(displayName, 255, "Website Chat"),
     status: "connected",
-    encryptedCredentials: encryptSettings(settings),
+    widgetSettings,
     capabilities: { receiveMessages: true, sendMessages: true, attachments: false, readReceipts: false },
     grantedScopes: [],
     connectedByUserId: userId || null,
@@ -157,7 +172,7 @@ async function configure({ locationId, userId, settings = {}, displayName }) {
     lastErrorCode: null,
     lastErrorMessageSafe: null,
   };
-  if (connection) await connection.update(values);
+  if (connection) return updateConfiguration({ connectionId: connection.id, locationId: id, settings: widgetSettings, displayName });
   else connection = await models.CrmConversationChannelConnection.create({
     ...values,
     externalAccountId: `wc_${crypto.randomBytes(18).toString("base64url")}`,
@@ -172,11 +187,22 @@ async function updateConfiguration({ connectionId, locationId, settings, display
     where: { id: connectionId, locationId: id, channel: "webchat", provider: "movira" },
   });
   if (!connection) throw serviceError("Web chat connection not found.", 404, "webchat_connection_not_found");
-  await connection.update({
+  const widgetSettings = requiredSettings({ ...settingsFor(connection), ...settings });
+  if (widgetSettings.aiEnabled) await callCore("context", { locationId: id, requireAi: true });
+  await getModels().sequelize.transaction(async (transaction) => {
+    await connection.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    await connection.update({
     displayName: cleanText(displayName, 255, connection.displayName || "Website Chat"),
-    encryptedCredentials: encryptSettings(settings || settingsFor(connection)),
+    widgetSettings,
+    capabilities: { receiveMessages: true, sendMessages: true, attachments: false, readReceipts: false },
     status: "connected",
     disconnectedAt: null,
+    }, { transaction });
+    if (!widgetSettings.aiEnabled || !widgetSettings.enabled) {
+      await getModels().CrmConversation.update({ handlingMode: "waiting", assignedTeamId: widgetSettings.team }, {
+        where: { connectionId, handlingMode: "ai" }, transaction,
+      });
+    }
   });
   return publicConnection(connection);
 }
@@ -187,13 +213,14 @@ async function findPublicConnection(widgetKey) {
     where: { externalAccountId: cleanText(widgetKey, 255), channel: "webchat", provider: "movira", status: "connected" },
   });
   if (!connection) throw serviceError("Chat widget not found.", 404, "webchat_widget_not_found");
+  if (!settingsFor(connection).enabled) throw serviceError("Chat is disabled.", 404, "webchat_disabled");
   return connection;
 }
 
 function assertOriginAllowed(connection, requestOrigin) {
   const origin = normalizeOrigin(requestOrigin);
   const allowed = settingsFor(connection).allowedOrigins;
-  if (!origin || !allowed.length || allowed.includes(origin)) return origin;
+  if (origin && allowed.length && allowed.includes(origin)) return origin;
   throw serviceError("This website is not allowed to use the chat widget.", 403, "webchat_origin_not_allowed");
 }
 
@@ -202,10 +229,10 @@ function tokenHash(token) {
 }
 
 function safeVisitor(input = {}, locationCountry = "Canada") {
-  const email = cleanText(input.email, 320).toLowerCase();
+  const email = String(input.email || "").trim().toLowerCase();
   const rawPhone = cleanText(input.phone, 30);
   const phone = rawPhone ? require("../../utils/phoneNumber").normalizePhoneNumber(rawPhone, locationCountry) : null;
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw serviceError("Enter a valid email address.", 400, "invalid_email");
+  if (email && (email.length > 254 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(email) || email.split('@')[0].length > 64 || /(^\.|\.\.|\.@)/.test(email))) throw serviceError("Enter a valid email address.", 400, "invalid_email");
   if (rawPhone && !phone) throw serviceError(`Enter a valid phone number for ${locationCountry}.`, 400, "invalid_phone");
   return {
     name: cleanText(input.name, 120, "Website visitor"),
@@ -227,24 +254,41 @@ function enforceVisitorRequirements(settings, input, safe) {
   }
 }
 
-async function startSession({ widgetKey, origin, visitor = {}, sessionToken }) {
+function sessionWhere(connectionId, sessionToken) {
+  const hash = tokenHash(sessionToken);
+  return { connectionId, [Op.or]: [
+    { "metadataSafe.sessionTokenHash": hash },
+    { metadataSafe: { [Op.contains]: { sessionTokenHashes: [hash] } } },
+  ] };
+}
+
+async function startSession({ widgetKey, origin, visitor = {}, sessionToken, clientIp = "", challenge, company }) {
   const connection = await findPublicConnection(widgetKey);
   assertOriginAllowed(connection, origin);
-  const settings = settingsFor(connection);
+  let settings = settingsFor(connection);
   const models = getModels();
   if (sessionToken) {
     const existing = await models.CrmConversation.findOne({
-      where: { connectionId: connection.id, "metadataSafe.sessionTokenHash": tokenHash(sessionToken) },
+      where: sessionWhere(connection.id, sessionToken),
     });
     if (existing) return { sessionToken, conversationId: existing.id, visitor: existing.metadataSafe?.visitor || safeVisitor(visitor, settings.locationCountry) };
   }
 
-  const safe = safeVisitor(visitor, settings.locationCountry);
-  enforceVisitorRequirements(settings, visitor, safe);
+  let safe;
   const rawToken = crypto.randomBytes(32).toString("base64url");
   const externalUserId = `visitor_${crypto.randomBytes(16).toString("base64url")}`;
   const externalThreadId = `thread_${crypto.randomBytes(16).toString("base64url")}`;
-  return models.sequelize.transaction(async (transaction) => {
+  const result = await models.sequelize.transaction(async (transaction) => {
+    await connection.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    settings = settingsFor(connection);
+    if (connection.status !== "connected" || !settings.enabled) throw serviceError("Chat is currently unavailable.", 409, "webchat_disabled");
+    assertOriginAllowed(connection, origin);
+    security.validateBrowserChallenge(challenge, connection.id, normalizeOrigin(origin), clientIp, company);
+    const rateLimitKey = clientIp ? crypto.createHmac("sha256", require("../../config").internalApiSecret).update(clientIp).digest("hex") : null;
+    const starts = await models.CrmConversation.count({ where: { connectionId: connection.id, "metadataSafe.rateLimitKey": rateLimitKey, createdAt: { [Op.gt]: new Date(Date.now() - 3600_000) } }, transaction });
+    if (starts >= 10) throw serviceError("Too many new chats. Please return to your existing chat or try again later.", 429, "webchat_session_rate_limited");
+    safe = safeVisitor(visitor, settings.locationCountry);
+    enforceVisitorRequirements(settings, visitor, safe);
     const identity = await models.CrmConversationIdentity.create({
       locationId: connection.locationId,
       connectionId: connection.id,
@@ -252,7 +296,7 @@ async function startSession({ widgetKey, origin, visitor = {}, sessionToken }) {
       externalUserId,
       displayName: safe.name,
       handle: safe.email || safe.phone || "Website visitor",
-      profileMetadataSafe: { email: safe.email || null, phone: safe.phone || null, firstPageUrl: safe.pageUrl || null },
+      profileMetadataSafe: { email: safe.email, phone: safe.phone || null, firstPageUrl: safe.pageUrl || null },
       matchMethod: safe.email ? "webchat_email_unverified" : safe.phone ? "webchat_phone_unverified" : "webchat_anonymous",
       lastSeenAt: new Date(),
     }, { transaction });
@@ -263,11 +307,21 @@ async function startSession({ widgetKey, origin, visitor = {}, sessionToken }) {
       externalThreadId,
       channel: "webchat",
       status: "open",
+      handlingMode: settings.aiEnabled ? "ai" : "waiting",
+      assignedTeamId: settings.team,
       subject: safe.pageUrl ? `Website chat · ${safe.pageUrl}`.slice(0, 500) : "Website chat",
-      metadataSafe: { sessionTokenHash: tokenHash(rawToken), visitor: safe, origin: normalizeOrigin(origin) },
+      metadataSafe: { sessionTokenHash: tokenHash(rawToken), sessionTokenHashes: [tokenHash(rawToken)], visitor: safe, origin: normalizeOrigin(origin),
+        emailVerified: false,
+        rateLimitKey: clientIp ? crypto.createHmac("sha256", require("../../config").internalApiSecret).update(clientIp).digest("hex") : null },
     }, { transaction });
-    return { sessionToken: rawToken, conversationId: conversation.id, visitor: safe };
+    await models.CrmConversationOutbox.create({
+      locationId: connection.locationId, aggregateType: "conversation", aggregateId: conversation.id,
+      eventType: "conversation.contact.sync", payloadSafe: { conversationId: conversation.id },
+    }, { transaction });
+    return { sessionToken: rawToken, conversationId: conversation.id, visitor: safe, emailVerified: false };
   });
+  if (result.error) throw result.error;
+  return result;
 }
 
 async function authenticatedSession(widgetKey, sessionToken, origin) {
@@ -275,7 +329,7 @@ async function authenticatedSession(widgetKey, sessionToken, origin) {
   assertOriginAllowed(connection, origin);
   const { CrmConversation } = getModels();
   const conversation = await CrmConversation.findOne({
-    where: { connectionId: connection.id, "metadataSafe.sessionTokenHash": tokenHash(sessionToken) },
+    where: sessionWhere(connection.id, sessionToken),
   });
   if (!conversation) throw serviceError("Chat session is invalid or expired.", 401, "invalid_webchat_session");
   return { connection, conversation };
@@ -289,10 +343,27 @@ async function addVisitorMessage({ widgetKey, sessionToken, origin, textBody, id
   const key = cleanText(idempotencyKey, 200);
   if (key) {
     const duplicate = await models.CrmConversationMessage.findOne({ where: { locationId: connection.locationId, idempotencyKey: key } });
-    if (duplicate) return duplicate;
+    if (duplicate) {
+      if (duplicate.conversationId !== conversation.id) throw serviceError("Message key belongs to another session.", 409, "idempotency_key_conflict");
+      return duplicate;
+    }
   }
   const occurredAt = new Date();
   return models.sequelize.transaction(async (transaction) => {
+    await connection.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (connection.status !== "connected" || !settingsFor(connection).enabled) throw serviceError("Chat is currently unavailable.", 409, "webchat_disabled");
+    await conversation.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (conversation.status === 'spam') throw serviceError('This conversation is blocked. Please contact the park another way.', 409, 'conversation_blocked');
+    if (key) {
+      const duplicate = await models.CrmConversationMessage.findOne({ where: { locationId: connection.locationId, idempotencyKey: key }, transaction });
+      if (duplicate) {
+        if (duplicate.conversationId !== conversation.id) throw serviceError("Message key belongs to another session.", 409, "idempotency_key_conflict");
+        return duplicate;
+      }
+    }
+    const recentMessages = await models.CrmConversationMessage.count({ where: { conversationId: conversation.id, direction: "inbound", occurredAt: { [Op.gt]: new Date(Date.now() - 60_000) } }, transaction });
+    if (recentMessages >= 20) throw serviceError("Please slow down and wait a moment before sending another message.", 429, "webchat_message_rate_limited");
+    await require('./routingService').routeInbound(models, conversation, text, transaction);
     const message = await models.CrmConversationMessage.create({
       locationId: connection.locationId,
       conversationId: conversation.id,
@@ -308,6 +379,7 @@ async function addVisitorMessage({ widgetKey, sessionToken, origin, textBody, id
     }, { transaction });
     await conversation.update({
       status: "open",
+      closedAt: null,
       lastMessageId: message.id,
       lastMessageDirection: "inbound",
       lastMessageAt: occurredAt,
@@ -315,6 +387,10 @@ async function addVisitorMessage({ widgetKey, sessionToken, origin, textBody, id
       unreadCount: Number(conversation.unreadCount || 0) + 1,
     }, { transaction });
     await models.CrmConversationIdentity.update({ lastSeenAt: occurredAt }, { where: { id: conversation.identityId }, transaction });
+    await models.CrmConversationOutbox.create({
+      locationId: connection.locationId, aggregateType: "conversation", aggregateId: conversation.id,
+      eventType: "conversation.contact.sync", payloadSafe: { conversationId: conversation.id },
+    }, { transaction });
     await models.CrmConversationChannelConnection.update({ lastWebhookAt: occurredAt }, { where: { id: connection.id }, transaction });
     await models.CrmConversationOutbox.create({
       locationId: connection.locationId,
@@ -325,14 +401,27 @@ async function addVisitorMessage({ widgetKey, sessionToken, origin, textBody, id
       status: "completed",
       processedAt: occurredAt,
     }, { transaction });
+    if (conversation.handlingMode === "ai" && settingsFor(connection).aiEnabled) {
+      await models.CrmConversationOutbox.create({
+        locationId: connection.locationId, aggregateType: "conversation", aggregateId: conversation.id,
+        eventType: "conversation.ai.reply", payloadSafe: { conversationId: conversation.id, messageId: message.id, handlingVersion: conversation.handlingVersion },
+      }, { transaction });
+    }
     return message;
   });
 }
 
-async function listVisitorMessages({ widgetKey, sessionToken, origin, after }) {
+async function listVisitorMessages({ widgetKey, sessionToken, origin, after, afterId }) {
   const { conversation } = await authenticatedSession(widgetKey, sessionToken, origin);
   const where = { conversationId: conversation.id, direction: { [Op.in]: ["inbound", "outbound"] } };
-  if (after && !Number.isNaN(Date.parse(after))) where.occurredAt = { [Op.gt]: new Date(after) };
+  // Include the boundary timestamp; the widget de-duplicates IDs so equal-time
+  // messages and reconnects cannot silently lose history.
+  if (after && !Number.isNaN(Date.parse(after))) {
+    if (/^[a-f0-9-]{36}$/i.test(afterId || "")) where[Op.or] = [
+      { occurredAt: { [Op.gt]: new Date(after) } }, { occurredAt: new Date(after), id: { [Op.gt]: afterId } },
+    ];
+    else where.occurredAt = { [Op.gte]: new Date(after) };
+  }
   const { CrmConversationMessage } = getModels();
   const rows = await CrmConversationMessage.findAll({ where, order: [["occurredAt", "ASC"], ["id", "ASC"]], limit: 100 });
   return rows.map((row) => ({
@@ -341,13 +430,37 @@ async function listVisitorMessages({ widgetKey, sessionToken, origin, after }) {
     textBody: row.textBody,
     status: row.status,
     occurredAt: row.occurredAt,
+    author: row.metadataSafe?.author || (row.direction === "inbound" ? "visitor" : "agent"),
+    choices: row.metadataSafe?.choices || [],
+    cards: row.metadataSafe?.cards || [],
   }));
 }
 
-async function getPublicConfig(widgetKey, origin) {
+async function handoff({ widgetKey, sessionToken, origin }) {
+  const { conversation, connection } = await authenticatedSession(widgetKey, sessionToken, origin);
+  const updated = await require("./webchatOrchestration").takeOver(conversation.id, connection.locationId, "waiting");
+  return { handlingMode: updated.handlingMode, message: settingsFor(connection).offlineMessage };
+}
+
+async function sessionStatus({ widgetKey, sessionToken, origin }) {
+  const { conversation, connection } = await authenticatedSession(widgetKey, sessionToken, origin);
+  return { handlingMode: conversation.handlingMode, settings: settingsFor(connection) };
+}
+
+async function leadRequest({ widgetKey, sessionToken, origin, fields, submit = false }) {
+  const { conversation, connection } = await authenticatedSession(widgetKey, sessionToken, origin);
+  if (conversation.status === 'spam') throw serviceError('This conversation is blocked.', 409, 'conversation_blocked');
+  return callCore(submit ? "lead-submit" : "lead-form", {
+    locationId: connection.locationId, conversationId: conversation.id,
+    visitor: conversation.metadataSafe?.visitor || {}, fields,
+  });
+}
+
+async function getPublicConfig(widgetKey, origin, clientIp = "") {
   const connection = await findPublicConnection(widgetKey);
   assertOriginAllowed(connection, origin);
-  return { displayName: connection.displayName || "Chat with us", ...settingsFor(connection) };
+  return { displayName: connection.displayName || "Chat with us", ...settingsFor(connection),
+    browserChallenge: security.browserChallenge(connection.id, normalizeOrigin(origin), clientIp) };
 }
 
 module.exports = {
@@ -360,5 +473,6 @@ module.exports = {
   settingsFor,
   publicConnection,
   assertOriginAllowed,
+  handoff, sessionStatus, leadRequest,
   _internal: { normalizeSettings, normalizeOrigin, safeVisitor, tokenHash, enforceVisitorRequirements },
 };

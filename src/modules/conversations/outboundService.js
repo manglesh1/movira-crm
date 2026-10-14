@@ -20,6 +20,7 @@ function normalizeIdempotencyKey(value) {
 }
 
 function validateReply(conversation, connection, now = new Date()) {
+  if (conversation.status === 'spam') throw error('Reopen this blocked conversation before replying.', 409, 'conversation_blocked');
   if (connection?.status !== "connected") throw error("This channel is not connected.", 409, "channel_not_connected");
   if (connection?.capabilities?.sendMessages !== true) throw error("This channel cannot send messages.", 409, "provider_send_not_supported");
   if (conversation.replyWindowClosesAt && new Date(conversation.replyWindowClosesAt) <= now) {
@@ -66,12 +67,13 @@ async function queueReply(conversationId, input, actorUserId, idempotencyHeader)
       validateReply(conversation, connection);
       const occurredAt = new Date();
       const message = await models.CrmConversationMessage.create({
-        locationId, conversationId, connectionId: connection.id, direction: "outbound", messageType: "text",
+        locationId, conversationId, connectionId: connection.id, direction: "outbound", authorType: "staff", messageType: "text",
         textBody, attachments: [], idempotencyKey, status: "queued", sentByUserId: actorUserId || null,
         occurredAt, metadataSafe: {},
       }, { transaction });
       await conversation.update({
         lastMessageId: message.id, lastMessageDirection: "outbound", lastMessageAt: occurredAt,
+        handlingMode: "human", handlingVersion: conversation.handlingVersion + 1,
       }, { transaction });
       await models.CrmConversationOutbox.create({
         locationId, aggregateType: "conversation_message", aggregateId: message.id,
@@ -92,14 +94,22 @@ function retryDelayMs(attempt, random = Math.random) {
   return exponential + Math.floor(exponential * 0.2 * random());
 }
 
-async function claimSendEvents({ workerId, limit = 10 }) {
+function claimSendEvents(options) {
+  return claimEvents(options, "conversation.message.send");
+}
+
+function claimWebchatEvents(options) {
+  return claimEvents(options, ["conversation.ai.reply", "conversation.contact.sync"]);
+}
+
+async function claimEvents({ workerId, limit = 10 }, eventType) {
   const models = getModels();
   const staleBefore = new Date(Date.now() - config.conversations.staleLockMs);
   await models.CrmConversationOutbox.update({ status: "pending", lockedAt: null }, {
-    where: { eventType: "conversation.message.send", status: "processing", lockedAt: { [Op.lt]: staleBefore } },
+    where: { eventType, status: "processing", lockedAt: { [Op.lt]: staleBefore } },
   });
   const candidates = await models.CrmConversationOutbox.findAll({
-    where: { eventType: "conversation.message.send", status: "pending", availableAt: { [Op.lte]: new Date() } },
+    where: { eventType, status: "pending", availableAt: { [Op.lte]: new Date() } },
     order: [["availableAt", "ASC"], ["createdAt", "ASC"]], limit,
   });
   const claimed = [];
@@ -234,6 +244,6 @@ async function listEvents(input) {
 }
 
 module.exports = {
-  queueReply, claimSendEvents, processSendEvent, listEvents,
+  queueReply, claimSendEvents, claimWebchatEvents, processSendEvent, listEvents,
   _internal: { normalizeIdempotencyKey, validateReply, retryDelayMs, encodeEventCursor, decodeEventCursor, metaSenderAccountId },
 };

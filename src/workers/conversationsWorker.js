@@ -10,9 +10,7 @@ process.on("SIGTERM", () => { stopping = true; });
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function run() {
-  const workerId = `${process.env.HOSTNAME || "local"}:${process.pid}:conversations-worker`;
-  logger.info({ workerId }, "conversations worker started");
+async function runOutbound(workerId) {
   while (!stopping) {
     const events = await outbound.claimSendEvents({ workerId, limit: config.conversations.workerBatchSize });
     if (!events.length) {
@@ -30,6 +28,38 @@ async function run() {
       }
     }
   }
+}
+
+// Separate polling keeps slow AI/core requests out of other channels' send loop.
+async function runWebchat(workerId) {
+  const orchestration = require("../modules/conversations/webchatOrchestration");
+  while (!stopping) {
+    try {
+      const events = await outbound.claimWebchatEvents({ workerId, limit: config.conversations.workerBatchSize });
+      if (!events.length) {
+        await sleep(config.conversations.workerPollMs);
+        continue;
+      }
+      for (const event of events) {
+        try {
+          await orchestration.processEvent(event);
+        } catch (err) {
+          logger.error({ err, outboxId: event.id }, "webchat event crashed");
+          const attempts = Number(event.attemptCount || 0) + 1;
+          await event.update({ status: attempts < config.conversations.outboundMaxAttempts ? "pending" : "failed", attemptCount: attempts, lockedAt: null, availableAt: new Date(Date.now() + 30_000), lastErrorCode: "worker_crash", lastErrorMessageSafe: "Webchat worker failed before recording the result." }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, "webchat queue polling failed");
+      await sleep(config.conversations.workerPollMs);
+    }
+  }
+}
+
+async function run() {
+  const workerId = `${process.env.HOSTNAME || "local"}:${process.pid}:conversations-worker`;
+  logger.info({ workerId }, "conversations worker started");
+  await Promise.all([runOutbound(workerId), runWebchat(`${workerId}:webchat`)]);
   logger.info({ workerId }, "conversations worker stopped");
 }
 
