@@ -53,6 +53,7 @@ jobs:
           node --check src/workers/contactsWorker.js
           node --check src/workers/segmentsWorker.js
           node --check src/workers/automationWorker.js
+          node --check src/workers/conversationsWorker.js
 
       - name: Test
         run: npm test
@@ -113,7 +114,8 @@ jobs:
             movira-crm-warmup-worker \
             movira-crm-contacts-worker \
             movira-crm-segments-worker \
-            movira-crm-automation-worker
+            movira-crm-automation-worker \
+            movira-crm-conversations-worker
           do
             pm2 delete "\${app}" >/dev/null 2>&1 || true
           done
@@ -152,6 +154,7 @@ jobs:
           pm2 start src/workers/contactsWorker.js --name movira-crm-contacts-worker --time
           pm2 start src/workers/segmentsWorker.js --name movira-crm-segments-worker --time
           pm2 start src/workers/automationWorker.js --name movira-crm-automation-worker --time
+          pm2 start src/workers/conversationsWorker.js --name movira-crm-conversations-worker --time
           pm2 save
           systemctl restart nginx
           REMOTE
